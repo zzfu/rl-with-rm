@@ -45,6 +45,21 @@ python train_rm.py --epochs 1 --batch_size 4 --lr 1e-5
 | `--eval_steps` | 500 | Evaluate every N steps |
 | `--save_steps` | 2000 | Save checkpoint every N steps |
 | `--output_dir` | ./checkpoints/rm | Output directory |
+| `--log_dir` | ./logs/rm | TensorBoard log directory |
+
+### TensorBoard
+
+Monitor training in real-time:
+
+```bash
+tensorboard --logdir ./logs/rm
+```
+
+Metrics are logged with both step and examples_seen as x-axis options:
+- `train/loss`, `train/accuracy` - by step
+- `train/loss_by_examples`, `train/accuracy_by_examples` - by examples seen
+- `eval/loss`, `eval/accuracy` - by step
+- `eval/loss_by_examples`, `eval/accuracy_by_examples` - by examples seen
 
 ## Chat Interface
 

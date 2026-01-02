@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from models import load_reward_model, load_tokenizer
@@ -38,6 +39,9 @@ class TrainConfig:
     # Checkpointing
     save_steps: int = 2000  # 0 to disable step-based saving (~5 saves per epoch)
     output_dir: str = "./checkpoints/rm"
+
+    # Logging
+    log_dir: str = "./logs/rm"
 
 
 def bradley_terry_loss(chosen_rewards: torch.Tensor, rejected_rewards: torch.Tensor) -> torch.Tensor:
@@ -104,8 +108,11 @@ def train(
     """Train the reward model."""
     device = next(model.parameters()).device
     os.makedirs(config.output_dir, exist_ok=True)
+    os.makedirs(config.log_dir, exist_ok=True)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
+    writer = SummaryWriter(log_dir=config.log_dir)
+    effective_batch_size = config.batch_size * config.grad_accum_steps
 
     print(f"\nTraining config:")
     print(f"  Epochs: {config.epochs}")
@@ -146,6 +153,15 @@ def train(
                 optimizer.step()
                 optimizer.zero_grad()
                 global_step += 1
+                examples_seen = global_step * effective_batch_size
+
+                # Log training metrics (log every step for smooth curves)
+                step_loss = loss.item() * config.grad_accum_steps
+                step_acc = compute_accuracy(chosen_rewards, rejected_rewards)
+                writer.add_scalar("train/loss", step_loss, global_step)
+                writer.add_scalar("train/accuracy", step_acc, global_step)
+                writer.add_scalar("train/loss_by_examples", step_loss, examples_seen)
+                writer.add_scalar("train/accuracy_by_examples", step_acc, examples_seen)
 
                 # Evaluate every N steps
                 if config.eval_steps > 0 and global_step % config.eval_steps == 0:
@@ -154,6 +170,10 @@ def train(
                         config.eval_batch_size, config.eval_num_batches
                     )
                     print(f"\n[Step {global_step}] Test - Loss: {test_loss:.4f}, Acc: {test_acc:.2%}")
+                    writer.add_scalar("eval/loss", test_loss, global_step)
+                    writer.add_scalar("eval/accuracy", test_acc, global_step)
+                    writer.add_scalar("eval/loss_by_examples", test_loss, examples_seen)
+                    writer.add_scalar("eval/accuracy_by_examples", test_acc, examples_seen)
                     model.train()
 
                 # Save every N steps
@@ -179,9 +199,15 @@ def train(
             config.eval_batch_size, config.eval_num_batches
         )
         print(f"Epoch {epoch + 1} - Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2%}")
+        examples_seen = global_step * effective_batch_size
+        writer.add_scalar("eval/loss", test_loss, global_step)
+        writer.add_scalar("eval/accuracy", test_acc, global_step)
+        writer.add_scalar("eval/loss_by_examples", test_loss, examples_seen)
+        writer.add_scalar("eval/accuracy_by_examples", test_acc, examples_seen)
 
     # Save final model
     save_checkpoint(model, tokenizer, config.output_dir, global_step)
+    writer.close()
     print("\nTraining complete!")
 
 
@@ -200,6 +226,7 @@ def main():
     parser.add_argument("--eval_num_batches", type=int, default=defaults.eval_num_batches)
     parser.add_argument("--save_steps", type=int, default=defaults.save_steps)
     parser.add_argument("--output_dir", type=str, default=defaults.output_dir)
+    parser.add_argument("--log_dir", type=str, default=defaults.log_dir)
     args = parser.parse_args()
 
     config = TrainConfig(
@@ -214,6 +241,7 @@ def main():
         eval_num_batches=args.eval_num_batches,
         save_steps=args.save_steps,
         output_dir=args.output_dir,
+        log_dir=args.log_dir,
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
