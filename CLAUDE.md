@@ -12,8 +12,24 @@ A self-educational project for learning to train Large Language Models (LLMs) us
 
 ## Project Structure
 
-(To be updated as the project develops)
+```
+models.py         # Model definitions (RewardModel, PolicyModel)
+chat.py           # Gradio chatbot UI for testing models
+requirements.txt  # Python dependencies
+```
 
 ## Key Decisions
 
-(To be updated as architectural and implementation decisions are made)
+### Base Model
+- **Qwen3-0.6B**: Small enough for full-parameter tuning (~10-12GB VRAM)
+- Architecture: 28 layers, 16 Q-heads, 8 KV-heads (GQA), 32K context
+
+### Model Architecture
+- **RewardModel**: `Qwen3Model` (no LM head) + `nn.Linear(hidden_size, 1)` value head
+  - Outputs scalar reward from last token's hidden state
+  - Value head initialized with small random weights (std=0.02)
+- **PolicyModel**: Standard `Qwen3ForCausalLM` for RL training
+
+### Training Approach
+- Full parameter tuning (not LoRA/QLoRA)
+- bf16 precision
