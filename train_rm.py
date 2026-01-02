@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from models import load_reward_model, load_tokenizer
+from models import load_reward_model, load_reward_model_lora, load_tokenizer
 from data import HHRLHFDataset
 from utils import add_dataclass_args, build_config_from_args
 
@@ -50,6 +50,13 @@ class TrainConfig:
     # Logging
     log_dir: str = "./logs/rm"
     run_name: str = ""  # Run name (default: datetime)
+
+    # LoRA (ignored if use_lora=False)
+    use_lora: bool = False
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    lora_target_modules: str = "q_proj,k_proj,v_proj,o_proj"  # comma-separated
 
 
 def bradley_terry_loss(chosen_rewards: torch.Tensor, rejected_rewards: torch.Tensor) -> torch.Tensor:
@@ -302,6 +309,7 @@ def main():
     reverse_renames = add_dataclass_args(parser, TrainConfig, renames={
         "model_name": "model",
         "grad_accum_steps": "grad_accum",
+        "use_lora": "lora",
     })
     args = parser.parse_args()
 
@@ -317,11 +325,23 @@ def main():
     tokenizer = load_tokenizer(model_path)
 
     print(f"Loading reward model from {model_path}...")
-    model = load_reward_model(model_path, device_map="auto")
+    if config.use_lora:
+        model = load_reward_model_lora(
+            model_path,
+            lora_r=config.lora_r,
+            lora_alpha=config.lora_alpha,
+            lora_dropout=config.lora_dropout,
+            lora_target_modules=config.lora_target_modules.split(","),
+            device_map="auto",
+        )
+        model.print_trainable_parameters()
+    else:
+        model = load_reward_model(model_path, device_map="auto")
+        print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+
     if config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
         print("Gradient checkpointing enabled")
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     print("Loading datasets...")
     train_dataset = HHRLHFDataset(tokenizer, split="train", max_length=config.max_length)

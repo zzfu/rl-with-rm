@@ -8,3 +8,4 @@ bitsandbytes>=0.43.0
 wandb>=0.16.0
 gradio>=4.0.0
 tensorboard>=2.14.0
+peft>=0.10.0

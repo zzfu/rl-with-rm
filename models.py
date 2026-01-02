@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoModel, AutoTokenizer, PreTrainedModel
 from transformers.models.qwen3.modeling_qwen3 import Qwen3PreTrainedModel, Qwen3Model
+from peft import LoraConfig, get_peft_model
 
 
 class RewardModel(Qwen3PreTrainedModel):
@@ -111,6 +112,49 @@ def load_reward_model(model_name: str = "Qwen/Qwen3-0.6B", **kwargs):
         dtype=kwargs.pop("dtype", torch.bfloat16),
         **kwargs
     )
+    return model
+
+
+def load_reward_model_lora(
+    model_name: str = "Qwen/Qwen3-0.6B",
+    lora_r: int = 16,
+    lora_alpha: int = 32,
+    lora_dropout: float = 0.05,
+    lora_target_modules: list = None,
+    **kwargs
+):
+    """
+    Load the reward model with LoRA adapters.
+
+    Args:
+        model_name: Base model name or path
+        lora_r: LoRA rank
+        lora_alpha: LoRA alpha (scaling factor)
+        lora_dropout: Dropout for LoRA layers
+        lora_target_modules: List of module names to apply LoRA to
+        **kwargs: Additional args passed to model loading
+
+    Returns:
+        PeftModel with LoRA adapters
+    """
+    if lora_target_modules is None:
+        lora_target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+    # Load base model
+    base_model = load_reward_model(model_name, **kwargs)
+
+    # Configure LoRA
+    peft_config = LoraConfig(
+        r=lora_r,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        target_modules=lora_target_modules,
+        bias="none",
+        task_type="SEQ_CLS",
+    )
+
+    # Apply LoRA
+    model = get_peft_model(base_model, peft_config)
     return model
 
 
