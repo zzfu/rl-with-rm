@@ -338,6 +338,7 @@ def main():
 
     print(f"Loading reward model from {model_path}...")
     model = load_reward_model(model_path, device_map="auto")
+    model.gradient_checkpointing_enable()
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     print("Loading datasets...")
