@@ -6,6 +6,7 @@ A self-educational project for learning to train Large Language Models (LLMs) us
 
 ## Development Instructions
 
+- **Run Python scripts with venv**: `.venv/Scripts/python.exe script.py` (Windows)
 - **After every edit**: Check if changes to `CLAUDE.md` and `README.md` are needed
 - `CLAUDE.md` serves as context for Claude Code sessions - update with key decisions, architecture choices, and important implementation details
 - `README.md` is user-facing documentation - update when features, setup steps, or usage instructions change
