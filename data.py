@@ -218,6 +218,155 @@ class HHRLHFDataset(Dataset):
         return self.collate_fn(batch)
 
 
+class PromptDataset(Dataset):
+    """
+    Prompt-only dataset for GRPO training.
+
+    Extracts user prompts from HH-RLHF for policy model generation.
+    """
+
+    def __init__(
+        self,
+        tokenizer,
+        split: str = "train",
+        max_length: int = 512,
+    ):
+        """
+        Args:
+            tokenizer: HuggingFace tokenizer
+            split: "train" or "test"
+            max_length: Maximum prompt length (longer prompts skipped in sampling)
+        """
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+        print(f"Loading hh-rlhf dataset for prompts (split={split})...")
+        self.dataset = load_dataset("Anthropic/hh-rlhf", split=split)
+        print(f"Loaded {len(self.dataset)} examples")
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def _extract_prompt(self, text: str) -> str:
+        """
+        Extract the prompt (user turns) from a dialogue.
+
+        Returns the dialogue up to (and including) the last user turn,
+        formatted with chat template and generation prompt.
+        """
+        messages = parse_hh_dialogue(text)
+
+        # Find last user message index
+        last_user_idx = -1
+        for i, msg in enumerate(messages):
+            if msg["role"] == "user":
+                last_user_idx = i
+
+        if last_user_idx == -1:
+            # Fallback: use all messages if no user found
+            prompt_messages = messages
+        else:
+            # Include everything up to and including last user turn
+            prompt_messages = messages[: last_user_idx + 1]
+
+        # Apply chat template with generation prompt
+        formatted = self.tokenizer.apply_chat_template(
+            prompt_messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        return formatted
+
+    def _get_prompt_length(self, text: str) -> int:
+        """Get token count for prompt."""
+        formatted = self._extract_prompt(text)
+        tokens = self.tokenizer(formatted, add_special_tokens=False)
+        return len(tokens["input_ids"])
+
+    def _tokenize_prompt(self, text: str) -> dict:
+        """Extract and tokenize prompt from dialogue."""
+        formatted = self._extract_prompt(text)
+
+        tokens = self.tokenizer(
+            formatted,
+            return_tensors="pt",
+        )
+
+        return {
+            "input_ids": tokens["input_ids"].squeeze(0),
+            "attention_mask": tokens["attention_mask"].squeeze(0),
+        }
+
+    def __getitem__(self, idx: int) -> dict:
+        """Get a single prompt."""
+        item = self.dataset[idx]
+        # Use chosen dialogue (could also use rejected, both have same prompt)
+        return self._tokenize_prompt(item["chosen"])
+
+    def collate_fn(self, batch: list[dict]) -> dict:
+        """Collate function for DataLoader. Pads prompts."""
+        max_len = max(item["input_ids"].size(0) for item in batch)
+        padded_ids = []
+        padded_masks = []
+
+        for item in batch:
+            seq = item["input_ids"]
+            mask = item["attention_mask"]
+            pad_len = max_len - seq.size(0)
+
+            if pad_len > 0:
+                # Left padding for generation (model generates from right)
+                seq = torch.cat([torch.full((pad_len,), self.tokenizer.pad_token_id), seq])
+                mask = torch.cat([torch.zeros(pad_len, dtype=mask.dtype), mask])
+
+            padded_ids.append(seq)
+            padded_masks.append(mask)
+
+        return {
+            "input_ids": torch.stack(padded_ids),
+            "attention_mask": torch.stack(padded_masks),
+        }
+
+    def _try_get_item(self, idx: int) -> dict | None:
+        """Try to get an item, returning None if it exceeds max_length."""
+        item = self.dataset[idx]
+
+        prompt_len = self._get_prompt_length(item["chosen"])
+        if prompt_len > self.max_length:
+            return None
+
+        return self._tokenize_prompt(item["chosen"])
+
+    def sample_batch(self, batch_size: int) -> dict:
+        """
+        Sample a random batch of prompts.
+
+        Args:
+            batch_size: Number of prompts to sample
+
+        Returns:
+            Collated batch dict ready for model input
+        """
+        batch = []
+        max_attempts = batch_size * 10
+        attempts = 0
+
+        while len(batch) < batch_size and attempts < max_attempts:
+            idx = random.randint(0, len(self) - 1)
+            item = self._try_get_item(idx)
+            if item is not None:
+                batch.append(item)
+            attempts += 1
+
+        if len(batch) < batch_size:
+            raise RuntimeError(
+                f"Could not sample {batch_size} valid prompts in {max_attempts} attempts. "
+                f"Consider increasing max_length (current: {self.max_length})."
+            )
+
+        return self.collate_fn(batch)
+
+
 if __name__ == "__main__":
     # Quick test
     from models import load_tokenizer
@@ -244,3 +393,18 @@ if __name__ == "__main__":
     # Use attention mask to find actual content length
     content_len = batch["chosen_attention_mask"][0].sum().item()
     print(tokenizer.decode(batch["chosen_input_ids"][0][:content_len]))
+
+    print("\n" + "=" * 50)
+    print("Testing PromptDataset...")
+    prompt_dataset = PromptDataset(tokenizer, split="train", max_length=512)
+    print(f"Prompt dataset size: {len(prompt_dataset)}")
+
+    print("\nSample prompt batch (size=4):")
+    prompt_batch = prompt_dataset.sample_batch(4)
+    for key, value in prompt_batch.items():
+        print(f"  {key}: shape={value.shape}")
+
+    print("\nDecoded prompt (first in batch):")
+    mask = prompt_batch["attention_mask"][0]
+    content_start = (mask == 0).sum().item()  # Left padding
+    print(tokenizer.decode(prompt_batch["input_ids"][0][content_start:]))

@@ -20,8 +20,9 @@ uv pip install -r requirements.txt
 
 ```
 models.py         # RewardModel and PolicyModel definitions
-data.py           # HH-RLHF dataset loader
+data.py           # HH-RLHF dataset loader (preference pairs + prompts)
 train_rm.py       # Reward model training script
+train_grpo.py     # GRPO policy training script
 chat.py           # Gradio chatbot for testing models
 manage_runs.py    # Interactive tool to list/delete training runs
 utils.py          # CLI utilities
@@ -94,6 +95,58 @@ Metrics logged:
 - `train/grad_norm`, `train/lr`, `train/step_time` - optimization metrics
 - `eval/loss`, `eval/accuracy` - evaluation metrics
 - `*_by_examples` variants - same metrics with examples seen as x-axis
+
+## GRPO Policy Training
+
+Group Relative Policy Optimization - trains a policy model using a trained reward model.
+
+```bash
+python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
+```
+
+### How GRPO Works
+
+1. Generate N completions per prompt (group)
+2. Score each completion with the reward model
+3. Compute within-group advantages (relative ranking)
+4. Update policy with PPO loss + KL penalty (prevents drift from reference)
+
+### Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--model` | Qwen/Qwen3-0.6B | Policy base model |
+| `--reward_model_path` | (required) | Path to trained RM checkpoint |
+| `--epochs` | 1 | Number of epochs |
+| `--batch_size` | 4 | Prompts per batch |
+| `--group_size` | 4 | Completions per prompt |
+| `--lr` | 1e-6 | Learning rate |
+| `--kl_coef` | 0.05 | KL penalty coefficient |
+| `--cliprange` | 0.2 | PPO clipping range |
+| `--max_new_tokens` | 256 | Max tokens to generate |
+| `--temperature` | 0.7 | Sampling temperature |
+| `--output_dir` | ./checkpoints/grpo | Output directory |
+| `--log_dir` | ./logs/grpo | TensorBoard log directory |
+
+### LoRA Training
+
+```bash
+python train_grpo.py --reward_model_path ./checkpoints/rm/step-500 --lora
+```
+
+Same LoRA arguments as reward model training (`--lora_r`, `--lora_alpha`, etc.).
+
+### TensorBoard
+
+```bash
+tensorboard --logdir ./logs/grpo
+```
+
+Metrics logged:
+- `train/loss`, `train/policy_loss` - training losses
+- `train/kl_div` - KL divergence from reference policy
+- `train/reward_mean` - average reward from RM
+- `eval/reward`, `eval/kl_div` - evaluation metrics
 
 ## Chat Interface
 

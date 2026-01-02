@@ -14,8 +14,9 @@ A self-educational project for learning to train Large Language Models (LLMs) us
 
 ```
 models.py         # Model definitions (RewardModel, PolicyModel, LoRA loading)
-data.py           # HH-RLHF dataset loader for RM training
+data.py           # HH-RLHF dataset loader (preference pairs + prompts)
 train_rm.py       # Reward model training script (full-param and LoRA)
+train_grpo.py     # GRPO policy training script
 chat.py           # Gradio chatbot UI for testing models
 utils.py          # CLI utilities (auto argparse from dataclass)
 manage_runs.py    # Interactive tool to list/delete training runs
@@ -44,10 +45,18 @@ requirements.txt  # Python dependencies
 - Checkpoints save optimizer state for resuming; auto-save on crash/interrupt
 
 ### LoRA Training
-- Uses peft library with `task_type="SEQ_CLS"`
+- Uses peft library with `task_type="SEQ_CLS"` (RM) or `task_type="CAUSAL_LM"` (policy)
 - Default targets: `q_proj,k_proj,v_proj,o_proj` (attention projections)
 - Scaling formula: `W' = W + (α/r) × BA` where α=lora_alpha, r=lora_r
 - Checkpoints save only adapter weights (~few MB vs full model)
+
+### GRPO (Group Relative Policy Optimization)
+- Trains policy using trained reward model
+- **Group sampling**: N completions per prompt, advantages computed within-group
+- **Loss**: PPO with clipped objective + KL penalty from frozen reference policy
+- **Key hyperparams**: `group_size=4`, `kl_coef=0.05`, `cliprange=0.2`
+- Three models in memory: policy (trainable), ref_policy (frozen), reward_model (frozen)
+- `PromptDataset` extracts prompts from HH-RLHF with left-padding for generation
 
 ### Dataset
 - **Anthropic/hh-rlhf**: Human preference data (chosen/rejected pairs)
