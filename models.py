@@ -37,6 +37,7 @@ class RewardModel(Qwen3PreTrainedModel):
         output_attentions: bool = None,
         output_hidden_states: bool = None,
         return_dict: bool = None,
+        **kwargs,  # Accept extra args from peft wrapper
     ):
         """
         Forward pass that returns scalar rewards.
