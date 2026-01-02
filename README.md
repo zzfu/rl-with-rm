@@ -55,6 +55,24 @@ python train_rm.py
 | `--log_dir` | ./logs/rm | TensorBoard log directory |
 | `--run_name` | (datetime) | Run name for organizing outputs |
 
+### LoRA Training
+
+For parameter-efficient fine-tuning with much lower VRAM usage:
+
+```bash
+python train_rm.py --lora
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--lora` | False | Enable LoRA training |
+| `--lora_r` | 16 | LoRA rank |
+| `--lora_alpha` | 32 | LoRA alpha (scaling) |
+| `--lora_dropout` | 0.05 | LoRA dropout |
+| `--lora_target_modules` | q_proj,k_proj,v_proj,o_proj | Target modules (comma-separated) |
+
+LoRA checkpoints only save adapter weights (~few MB vs full model).
+
 ### Resuming Training
 
 Training automatically saves checkpoints on crash or interrupt (Ctrl+C). To resume:

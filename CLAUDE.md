@@ -13,10 +13,12 @@ A self-educational project for learning to train Large Language Models (LLMs) us
 ## Project Structure
 
 ```
-models.py         # Model definitions (RewardModel, PolicyModel)
+models.py         # Model definitions (RewardModel, PolicyModel, LoRA loading)
 data.py           # HH-RLHF dataset loader for RM training
-train_rm.py       # Reward model training script
+train_rm.py       # Reward model training script (full-param and LoRA)
 chat.py           # Gradio chatbot UI for testing models
+utils.py          # CLI utilities (auto argparse from dataclass)
+manage_runs.py    # Interactive tool to list/delete training runs
 requirements.txt  # Python dependencies
 ```
 
@@ -33,11 +35,19 @@ requirements.txt  # Python dependencies
 - **PolicyModel**: Standard `Qwen3ForCausalLM` for RL training
 
 ### Training Approach
-- Full parameter tuning (not LoRA/QLoRA)
+- Full parameter tuning (default) or LoRA with `--lora` flag
 - bf16 precision
 - **RM Loss**: Bradley-Terry pairwise ranking: `-log(sigmoid(r_chosen - r_rejected))`
 - `TrainConfig` dataclass holds all hyperparameters (single source of truth for defaults)
+- CLI auto-generated from dataclass via `utils.add_dataclass_args()`
 - Test evaluation samples with replacement (fast, configurable num_batches)
+- Checkpoints save optimizer state for resuming; auto-save on crash/interrupt
+
+### LoRA Training
+- Uses peft library with `task_type="SEQ_CLS"`
+- Default targets: `q_proj,k_proj,v_proj,o_proj` (attention projections)
+- Scaling formula: `W' = W + (α/r) × BA` where α=lora_alpha, r=lora_r
+- Checkpoints save only adapter weights (~few MB vs full model)
 
 ### Dataset
 - **Anthropic/hh-rlhf**: Human preference data (chosen/rejected pairs)
