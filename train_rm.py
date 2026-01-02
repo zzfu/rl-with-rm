@@ -32,7 +32,7 @@ class TrainConfig:
     batch_size: int = 4
     lr: float = 1e-5
     grad_accum_steps: int = 4
-    max_grad_norm: float = 1.0  # Gradient clipping (0 to disable)
+    max_grad_norm: float = 10.0  # Gradient clipping (0 to disable)
     gradient_checkpointing: bool = True  # Trade compute for memory
 
     # Evaluation
@@ -293,23 +293,26 @@ def main():
     # Use TrainConfig defaults as source of truth
     defaults = TrainConfig()
 
-    parser = argparse.ArgumentParser(description="Train Reward Model")
-    parser.add_argument("--model", type=str, default=defaults.model_name)
-    parser.add_argument("--epochs", type=int, default=defaults.epochs)
-    parser.add_argument("--batch_size", type=int, default=defaults.batch_size)
-    parser.add_argument("--lr", type=float, default=defaults.lr)
-    parser.add_argument("--max_length", type=int, default=defaults.max_length)
-    parser.add_argument("--grad_accum", type=int, default=defaults.grad_accum_steps)
-    parser.add_argument("--max_grad_norm", type=float, default=defaults.max_grad_norm)
-    parser.add_argument("--gradient_checkpointing", action="store_true", default=defaults.gradient_checkpointing)
-    parser.add_argument("--no_gradient_checkpointing", action="store_false", dest="gradient_checkpointing")
-    parser.add_argument("--eval_steps", type=int, default=defaults.eval_steps)
-    parser.add_argument("--eval_num_batches", type=int, default=defaults.eval_num_batches)
-    parser.add_argument("--save_steps", type=int, default=defaults.save_steps)
-    parser.add_argument("--output_dir", type=str, default=defaults.output_dir)
-    parser.add_argument("--resume_from", type=str, default=defaults.resume_from)
-    parser.add_argument("--log_dir", type=str, default=defaults.log_dir)
-    parser.add_argument("--run_name", type=str, default=defaults.run_name)
+    parser = argparse.ArgumentParser(
+        description="Train Reward Model with Bradley-Terry pairwise loss",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--model", type=str, default=defaults.model_name, help="Base model name or path")
+    parser.add_argument("--epochs", type=int, default=defaults.epochs, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=defaults.batch_size, help="Batch size per device")
+    parser.add_argument("--lr", type=float, default=defaults.lr, help="Learning rate")
+    parser.add_argument("--max_length", type=int, default=defaults.max_length, help="Max sequence length")
+    parser.add_argument("--grad_accum", type=int, default=defaults.grad_accum_steps, help="Gradient accumulation steps")
+    parser.add_argument("--max_grad_norm", type=float, default=defaults.max_grad_norm, help="Max gradient norm (0 to disable)")
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=defaults.gradient_checkpointing, help="Enable gradient checkpointing")
+    parser.add_argument("--no_gradient_checkpointing", action="store_false", dest="gradient_checkpointing", help="Disable gradient checkpointing")
+    parser.add_argument("--eval_steps", type=int, default=defaults.eval_steps, help="Evaluate every N steps (0 to disable)")
+    parser.add_argument("--eval_num_batches", type=int, default=defaults.eval_num_batches, help="Number of batches for evaluation")
+    parser.add_argument("--save_steps", type=int, default=defaults.save_steps, help="Save checkpoint every N steps")
+    parser.add_argument("--output_dir", type=str, default=defaults.output_dir, help="Output directory for checkpoints")
+    parser.add_argument("--resume_from", type=str, default=defaults.resume_from, help="Resume from checkpoint path")
+    parser.add_argument("--log_dir", type=str, default=defaults.log_dir, help="TensorBoard log directory")
+    parser.add_argument("--run_name", type=str, default=defaults.run_name, help="Run name (default: datetime)")
     args = parser.parse_args()
 
     config = TrainConfig(
