@@ -42,10 +42,21 @@ python train_rm.py --epochs 1 --batch_size 4 --lr 1e-5
 | `--batch_size` | 4 | Batch size |
 | `--lr` | 1e-5 | Learning rate |
 | `--grad_accum` | 4 | Gradient accumulation steps |
+| `--max_grad_norm` | 1.0 | Gradient clipping (0 to disable) |
 | `--eval_steps` | 500 | Evaluate every N steps |
 | `--save_steps` | 2000 | Save checkpoint every N steps |
 | `--output_dir` | ./checkpoints/rm | Output directory |
+| `--resume_from` | | Path to checkpoint to resume from |
 | `--log_dir` | ./logs/rm | TensorBoard log directory |
+| `--run_name` | (datetime) | Run name for organizing outputs |
+
+### Resuming Training
+
+Training automatically saves checkpoints on crash or interrupt (Ctrl+C). To resume:
+
+```bash
+python train_rm.py --resume_from ./checkpoints/rm/20240115_143022/step-1000
+```
 
 ### TensorBoard
 
@@ -55,11 +66,11 @@ Monitor training in real-time:
 tensorboard --logdir ./logs/rm
 ```
 
-Metrics are logged with both step and examples_seen as x-axis options:
-- `train/loss`, `train/accuracy` - by step
-- `train/loss_by_examples`, `train/accuracy_by_examples` - by examples seen
-- `eval/loss`, `eval/accuracy` - by step
-- `eval/loss_by_examples`, `eval/accuracy_by_examples` - by examples seen
+Metrics logged:
+- `train/loss`, `train/accuracy` - training metrics by step
+- `train/grad_norm`, `train/lr`, `train/step_time` - optimization metrics
+- `eval/loss`, `eval/accuracy` - evaluation metrics
+- `*_by_examples` variants - same metrics with examples seen as x-axis
 
 ## Chat Interface
 

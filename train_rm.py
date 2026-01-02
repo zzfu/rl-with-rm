@@ -6,7 +6,9 @@ Loss = -log(sigmoid(r_chosen - r_rejected))
 
 import argparse
 import os
+import time
 from dataclasses import dataclass
+from datetime import datetime
 
 import torch
 import torch.nn.functional as F
@@ -30,6 +32,7 @@ class TrainConfig:
     batch_size: int = 4
     lr: float = 1e-5
     grad_accum_steps: int = 4
+    max_grad_norm: float = 1.0  # Gradient clipping (0 to disable)
 
     # Evaluation
     eval_steps: int = 500  # 0 to disable step-based eval
@@ -39,9 +42,11 @@ class TrainConfig:
     # Checkpointing
     save_steps: int = 2000  # 0 to disable step-based saving (~5 saves per epoch)
     output_dir: str = "./checkpoints/rm"
+    resume_from: str = ""  # Path to checkpoint to resume from
 
     # Logging
     log_dir: str = "./logs/rm"
+    run_name: str = ""  # Run name (default: datetime)
 
 
 def bradley_terry_loss(chosen_rewards: torch.Tensor, rejected_rewards: torch.Tensor) -> torch.Tensor:
@@ -90,12 +95,18 @@ def evaluate(model, dataset, device, batch_size: int, num_batches: int):
     return total_loss / num_batches, total_acc / num_batches
 
 
-def save_checkpoint(model, tokenizer, output_dir: str, step: int):
-    """Save model checkpoint."""
+def save_checkpoint(model, tokenizer, optimizer, output_dir: str, step: int, epoch: int = 0):
+    """Save model checkpoint with training state."""
     save_path = os.path.join(output_dir, f"step-{step}")
     print(f"Saving checkpoint to {save_path}")
     model.save_pretrained(save_path)
     tokenizer.save_pretrained(save_path)
+    # Save training state for resuming
+    torch.save({
+        "step": step,
+        "epoch": epoch,
+        "optimizer_state_dict": optimizer.state_dict(),
+    }, os.path.join(save_path, "training_state.pt"))
 
 
 def train(
@@ -107,26 +118,73 @@ def train(
 ):
     """Train the reward model."""
     device = next(model.parameters()).device
-    os.makedirs(config.output_dir, exist_ok=True)
-    os.makedirs(config.log_dir, exist_ok=True)
+
+    # Setup run name and directories
+    run_name = config.run_name or datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(config.output_dir, run_name)
+    log_dir = os.path.join(config.log_dir, run_name)
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
-    writer = SummaryWriter(log_dir=config.log_dir)
+    writer = SummaryWriter(log_dir=log_dir)
     effective_batch_size = config.batch_size * config.grad_accum_steps
 
+    # Resume from checkpoint if specified
+    global_step = 0
+    start_epoch = 0
+    if config.resume_from:
+        state_path = os.path.join(config.resume_from, "training_state.pt")
+        if os.path.exists(state_path):
+            print(f"Resuming from checkpoint: {config.resume_from}")
+            state = torch.load(state_path, weights_only=True)
+            global_step = state["step"]
+            start_epoch = state["epoch"]
+            optimizer.load_state_dict(state["optimizer_state_dict"])
+            print(f"  Resumed at step {global_step}, epoch {start_epoch}")
+        else:
+            print(f"Warning: No training_state.pt found in {config.resume_from}, starting fresh")
+
     print(f"\nTraining config:")
+    print(f"  Run name: {run_name}")
     print(f"  Epochs: {config.epochs}")
     print(f"  Batch size: {config.batch_size}")
     print(f"  Gradient accumulation: {config.grad_accum_steps}")
     print(f"  Effective batch size: {config.batch_size * config.grad_accum_steps}")
     print(f"  Learning rate: {config.lr}")
+    print(f"  Gradient clipping: {config.max_grad_norm}" if config.max_grad_norm > 0 else "  Gradient clipping: disabled")
     print(f"  Eval every: {config.eval_steps} steps" if config.eval_steps > 0 else "  Eval: end of epoch only")
     print(f"  Save every: {config.save_steps} steps" if config.save_steps > 0 else "  Save: end of training only")
+    print(f"  Output dir: {output_dir}")
+    print(f"  Log dir: {log_dir}")
     print()
 
-    global_step = 0
+    try:
+        _train_loop(
+            model, tokenizer, optimizer, writer, train_loader, test_dataset,
+            config, output_dir, effective_batch_size, global_step, start_epoch
+        )
+    except KeyboardInterrupt:
+        print("\n\nTraining interrupted by user.")
+        save_checkpoint(model, tokenizer, optimizer, output_dir, global_step, start_epoch)
+        print("Checkpoint saved. You can resume with --resume_from flag.")
+    except Exception as e:
+        print(f"\n\nTraining crashed: {e}")
+        save_checkpoint(model, tokenizer, optimizer, output_dir, global_step, start_epoch)
+        print("Emergency checkpoint saved. You can resume with --resume_from flag.")
+        raise
+    finally:
+        writer.close()
 
-    for epoch in range(config.epochs):
+
+def _train_loop(
+    model, tokenizer, optimizer, writer, train_loader, test_dataset,
+    config, output_dir, effective_batch_size, global_step, start_epoch
+):
+    """Inner training loop (separated for crash handling)."""
+    device = next(model.parameters()).device
+
+    for epoch in range(start_epoch, config.epochs):
         print(f"=== Epoch {epoch + 1}/{config.epochs} ===")
 
         model.train()
@@ -134,6 +192,7 @@ def train(
         total_acc = 0.0
         num_batches = 0
         optimizer.zero_grad()
+        step_start_time = time.time()
 
         pbar = tqdm(train_loader, desc="Training")
         for step, batch in enumerate(pbar):
@@ -150,18 +209,38 @@ def train(
             loss.backward()
 
             if (step + 1) % config.grad_accum_steps == 0:
+                # Gradient clipping
+                if config.max_grad_norm > 0:
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), config.max_grad_norm
+                    ).item()
+                else:
+                    # Compute grad norm without clipping for logging
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), float("inf")
+                    ).item()
+
                 optimizer.step()
                 optimizer.zero_grad()
                 global_step += 1
                 examples_seen = global_step * effective_batch_size
 
-                # Log training metrics (log every step for smooth curves)
+                # Compute step time
+                step_time = time.time() - step_start_time
+                step_start_time = time.time()
+
+                # Log training metrics
                 step_loss = loss.item() * config.grad_accum_steps
                 step_acc = compute_accuracy(chosen_rewards, rejected_rewards)
+                current_lr = optimizer.param_groups[0]["lr"]
+
                 writer.add_scalar("train/loss", step_loss, global_step)
                 writer.add_scalar("train/accuracy", step_acc, global_step)
                 writer.add_scalar("train/loss_by_examples", step_loss, examples_seen)
                 writer.add_scalar("train/accuracy_by_examples", step_acc, examples_seen)
+                writer.add_scalar("train/grad_norm", grad_norm, global_step)
+                writer.add_scalar("train/lr", current_lr, global_step)
+                writer.add_scalar("train/step_time", step_time, global_step)
 
                 # Evaluate every N steps
                 if config.eval_steps > 0 and global_step % config.eval_steps == 0:
@@ -175,10 +254,11 @@ def train(
                     writer.add_scalar("eval/loss_by_examples", test_loss, examples_seen)
                     writer.add_scalar("eval/accuracy_by_examples", test_acc, examples_seen)
                     model.train()
+                    step_start_time = time.time()  # Reset after eval
 
                 # Save every N steps
                 if config.save_steps > 0 and global_step % config.save_steps == 0:
-                    save_checkpoint(model, tokenizer, config.output_dir, global_step)
+                    save_checkpoint(model, tokenizer, optimizer, output_dir, global_step, epoch)
 
             with torch.no_grad():
                 acc = compute_accuracy(chosen_rewards, rejected_rewards)
@@ -206,8 +286,7 @@ def train(
         writer.add_scalar("eval/accuracy_by_examples", test_acc, examples_seen)
 
     # Save final model
-    save_checkpoint(model, tokenizer, config.output_dir, global_step)
-    writer.close()
+    save_checkpoint(model, tokenizer, optimizer, output_dir, global_step, config.epochs)
     print("\nTraining complete!")
 
 
@@ -222,11 +301,14 @@ def main():
     parser.add_argument("--lr", type=float, default=defaults.lr)
     parser.add_argument("--max_length", type=int, default=defaults.max_length)
     parser.add_argument("--grad_accum", type=int, default=defaults.grad_accum_steps)
+    parser.add_argument("--max_grad_norm", type=float, default=defaults.max_grad_norm)
     parser.add_argument("--eval_steps", type=int, default=defaults.eval_steps)
     parser.add_argument("--eval_num_batches", type=int, default=defaults.eval_num_batches)
     parser.add_argument("--save_steps", type=int, default=defaults.save_steps)
     parser.add_argument("--output_dir", type=str, default=defaults.output_dir)
+    parser.add_argument("--resume_from", type=str, default=defaults.resume_from)
     parser.add_argument("--log_dir", type=str, default=defaults.log_dir)
+    parser.add_argument("--run_name", type=str, default=defaults.run_name)
     args = parser.parse_args()
 
     config = TrainConfig(
@@ -236,22 +318,28 @@ def main():
         batch_size=args.batch_size,
         lr=args.lr,
         grad_accum_steps=args.grad_accum,
+        max_grad_norm=args.max_grad_norm,
         eval_steps=args.eval_steps,
         eval_batch_size=args.batch_size,
         eval_num_batches=args.eval_num_batches,
         save_steps=args.save_steps,
         output_dir=args.output_dir,
+        resume_from=args.resume_from,
         log_dir=args.log_dir,
+        run_name=args.run_name,
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    print("Loading tokenizer...")
-    tokenizer = load_tokenizer(config.model_name)
+    # Load from checkpoint if resuming, otherwise from base model
+    model_path = config.resume_from if config.resume_from else config.model_name
 
-    print("Loading reward model...")
-    model = load_reward_model(config.model_name, device_map="auto")
+    print("Loading tokenizer...")
+    tokenizer = load_tokenizer(model_path)
+
+    print(f"Loading reward model from {model_path}...")
+    model = load_reward_model(model_path, device_map="auto")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     print("Loading datasets...")
