@@ -15,6 +15,7 @@ A self-educational project for learning to train Large Language Models (LLMs) us
 ```
 models.py         # Model definitions (RewardModel, PolicyModel)
 data.py           # HH-RLHF dataset loader for RM training
+train_rm.py       # Reward model training script
 chat.py           # Gradio chatbot UI for testing models
 requirements.txt  # Python dependencies
 ```
@@ -34,6 +35,9 @@ requirements.txt  # Python dependencies
 ### Training Approach
 - Full parameter tuning (not LoRA/QLoRA)
 - bf16 precision
+- **RM Loss**: Bradley-Terry pairwise ranking: `-log(sigmoid(r_chosen - r_rejected))`
+- `TrainConfig` dataclass holds all hyperparameters (single source of truth for defaults)
+- Test evaluation samples with replacement (fast, configurable num_batches)
 
 ### Dataset
 - **Anthropic/hh-rlhf**: Human preference data (chosen/rejected pairs)
