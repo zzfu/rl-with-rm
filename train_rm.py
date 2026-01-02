@@ -158,6 +158,8 @@ def train(
     print(f"  Output dir: {output_dir}")
     print(f"  Log dir: {log_dir}")
     print()
+    print(f"To monitor training, run: tensorboard --logdir {log_dir}")
+    print()
 
     try:
         _train_loop(
