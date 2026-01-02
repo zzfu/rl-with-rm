@@ -5,9 +5,10 @@ Loss = -log(sigmoid(r_chosen - r_rejected))
 """
 
 import argparse
+import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 
 import torch
@@ -97,8 +98,8 @@ def evaluate(model, dataset, device, batch_size: int, num_batches: int):
     return total_loss / num_batches, total_acc / num_batches
 
 
-def save_checkpoint(model, tokenizer, optimizer, output_dir: str, step: int, epoch: int = 0):
-    """Save model checkpoint with training state."""
+def save_checkpoint(model, tokenizer, optimizer, config, output_dir: str, step: int, epoch: int = 0):
+    """Save model checkpoint with training state and config."""
     save_path = os.path.join(output_dir, f"step-{step}")
     print(f"Saving checkpoint to {save_path}")
     model.save_pretrained(save_path)
@@ -109,6 +110,9 @@ def save_checkpoint(model, tokenizer, optimizer, output_dir: str, step: int, epo
         "epoch": epoch,
         "optimizer_state_dict": optimizer.state_dict(),
     }, os.path.join(save_path, "training_state.pt"))
+    # Save config for reproducibility
+    with open(os.path.join(save_path, "config.json"), "w") as f:
+        json.dump(asdict(config), f, indent=2)
 
 
 def train(
@@ -170,11 +174,11 @@ def train(
         )
     except KeyboardInterrupt:
         print("\n\nTraining interrupted by user.")
-        save_checkpoint(model, tokenizer, optimizer, output_dir, global_step, start_epoch)
+        save_checkpoint(model, tokenizer, optimizer, config, output_dir, global_step, start_epoch)
         print("Checkpoint saved. You can resume with --resume_from flag.")
     except Exception as e:
         print(f"\n\nTraining crashed: {e}")
-        save_checkpoint(model, tokenizer, optimizer, output_dir, global_step, start_epoch)
+        save_checkpoint(model, tokenizer, optimizer, config, output_dir, global_step, start_epoch)
         print("Emergency checkpoint saved. You can resume with --resume_from flag.")
         raise
     finally:
@@ -258,7 +262,7 @@ def _train_loop(
 
                 # Save every N steps
                 if config.save_steps > 0 and global_step % config.save_steps == 0:
-                    save_checkpoint(model, tokenizer, optimizer, output_dir, global_step, epoch)
+                    save_checkpoint(model, tokenizer, optimizer, config, output_dir, global_step, epoch)
 
             with torch.no_grad():
                 acc = compute_accuracy(chosen_rewards, rejected_rewards)
@@ -286,7 +290,7 @@ def _train_loop(
         writer.add_scalar("eval/accuracy_by_examples", test_acc, examples_seen)
 
     # Save final model
-    save_checkpoint(model, tokenizer, optimizer, output_dir, global_step, config.epochs)
+    save_checkpoint(model, tokenizer, optimizer, config, output_dir, global_step, config.epochs)
     print("\nTraining complete!")
 
 
