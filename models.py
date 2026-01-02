@@ -156,6 +156,11 @@ def load_reward_model_lora(
 
     # Apply LoRA
     model = get_peft_model(base_model, peft_config)
+
+    # Make value_head trainable (not part of LoRA targets)
+    for param in model.base_model.model.value_head.parameters():
+        param.requires_grad = True
+
     return model
 
 
