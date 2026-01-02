@@ -33,6 +33,7 @@ class TrainConfig:
     lr: float = 1e-5
     grad_accum_steps: int = 4
     max_grad_norm: float = 1.0  # Gradient clipping (0 to disable)
+    gradient_checkpointing: bool = True  # Trade compute for memory
 
     # Evaluation
     eval_steps: int = 500  # 0 to disable step-based eval
@@ -300,6 +301,8 @@ def main():
     parser.add_argument("--max_length", type=int, default=defaults.max_length)
     parser.add_argument("--grad_accum", type=int, default=defaults.grad_accum_steps)
     parser.add_argument("--max_grad_norm", type=float, default=defaults.max_grad_norm)
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=defaults.gradient_checkpointing)
+    parser.add_argument("--no_gradient_checkpointing", action="store_false", dest="gradient_checkpointing")
     parser.add_argument("--eval_steps", type=int, default=defaults.eval_steps)
     parser.add_argument("--eval_num_batches", type=int, default=defaults.eval_num_batches)
     parser.add_argument("--save_steps", type=int, default=defaults.save_steps)
@@ -317,6 +320,7 @@ def main():
         lr=args.lr,
         grad_accum_steps=args.grad_accum,
         max_grad_norm=args.max_grad_norm,
+        gradient_checkpointing=args.gradient_checkpointing,
         eval_steps=args.eval_steps,
         eval_batch_size=args.batch_size,
         eval_num_batches=args.eval_num_batches,
@@ -338,7 +342,9 @@ def main():
 
     print(f"Loading reward model from {model_path}...")
     model = load_reward_model(model_path, device_map="auto")
-    model.gradient_checkpointing_enable()
+    if config.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+        print("Gradient checkpointing enabled")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     print("Loading datasets...")
