@@ -23,6 +23,8 @@ models.py         # RewardModel and PolicyModel definitions
 data.py           # HH-RLHF dataset loader
 train_rm.py       # Reward model training script
 chat.py           # Gradio chatbot for testing models
+manage_runs.py    # Interactive tool to list/delete training runs
+utils.py          # CLI utilities
 ```
 
 ## Training the Reward Model
@@ -30,7 +32,7 @@ chat.py           # Gradio chatbot for testing models
 Uses Bradley-Terry pairwise loss on the [Anthropic/hh-rlhf](https://huggingface.co/datasets/Anthropic/hh-rlhf) dataset.
 
 ```bash
-python train_rm.py --epochs 1 --batch_size 4 --lr 1e-5
+python train_rm.py
 ```
 
 ### Arguments
@@ -39,12 +41,15 @@ python train_rm.py --epochs 1 --batch_size 4 --lr 1e-5
 |----------|---------|-------------|
 | `--model` | Qwen/Qwen3-0.6B | Base model |
 | `--epochs` | 1 | Number of epochs |
-| `--batch_size` | 4 | Batch size |
+| `--batch_size` | 32 | Batch size |
 | `--lr` | 1e-5 | Learning rate |
+| `--max_length` | 2048 | Max sequence length |
 | `--grad_accum` | 4 | Gradient accumulation steps |
-| `--max_grad_norm` | 1.0 | Gradient clipping (0 to disable) |
-| `--eval_steps` | 500 | Evaluate every N steps |
-| `--save_steps` | 2000 | Save checkpoint every N steps |
+| `--max_grad_norm` | 10.0 | Gradient clipping (0 to disable) |
+| `--gradient_checkpointing` | True | Trade compute for memory |
+| `--eval_steps` | 50 | Evaluate every N steps |
+| `--eval_num_batches` | 32 | Batches per evaluation |
+| `--save_steps` | 500 | Save checkpoint every N steps |
 | `--output_dir` | ./checkpoints/rm | Output directory |
 | `--resume_from` | | Path to checkpoint to resume from |
 | `--log_dir` | ./logs/rm | TensorBoard log directory |
