@@ -209,16 +209,12 @@ def _train_loop(
             (loss / config.grad_accum_steps).backward()
 
             if (step + 1) % config.grad_accum_steps == 0:
-                # Gradient clipping
-                if config.max_grad_norm > 0:
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), config.max_grad_norm
-                    ).item()
-                else:
-                    # Compute grad norm without clipping for logging
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), float("inf")
-                    ).item()
+                # Compute grad norm (before clipping)
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    config.max_grad_norm if config.max_grad_norm > 0 else float("inf")
+                ).item()
+                grad_clipped = 1.0 if (config.max_grad_norm > 0 and grad_norm > config.max_grad_norm) else 0.0
 
                 optimizer.step()
                 optimizer.zero_grad()
@@ -238,6 +234,7 @@ def _train_loop(
                 writer.add_scalar("train/loss_by_examples", loss_value, examples_seen)
                 writer.add_scalar("train/accuracy_by_examples", step_acc, examples_seen)
                 writer.add_scalar("train/grad_norm", grad_norm, global_step)
+                writer.add_scalar("train/grad_clipped", grad_clipped, global_step)
                 writer.add_scalar("train/lr", current_lr, global_step)
                 writer.add_scalar("train/step_time", step_time, global_step)
 
