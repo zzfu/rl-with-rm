@@ -14,6 +14,7 @@ A self-educational project for learning to train Large Language Models (LLMs) us
 
 ```
 models.py         # Model definitions (RewardModel, PolicyModel)
+data.py           # HH-RLHF dataset loader for RM training
 chat.py           # Gradio chatbot UI for testing models
 requirements.txt  # Python dependencies
 ```
@@ -33,3 +34,10 @@ requirements.txt  # Python dependencies
 ### Training Approach
 - Full parameter tuning (not LoRA/QLoRA)
 - bf16 precision
+
+### Dataset
+- **Anthropic/hh-rlhf**: Human preference data (chosen/rejected pairs)
+- Train: 161k, Test: 8.5k examples
+- Token stats: Mean ~219, P99 ~843, Max ~1780 (at 2048: ~0% truncated)
+- Runtime filtering: examples exceeding max_length are skipped during sampling (fast init)
+- Thinking tags (`<think>...</think>`) stripped from formatted output for RM training
