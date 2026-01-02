@@ -205,8 +205,8 @@ def _train_loop(
             rejected_rewards = model(input_ids=rejected_ids, attention_mask=rejected_mask)
 
             loss = bradley_terry_loss(chosen_rewards, rejected_rewards)
-            loss = loss / config.grad_accum_steps
-            loss.backward()
+            loss_value = loss.item()  # Per-example mean loss (before scaling)
+            (loss / config.grad_accum_steps).backward()
 
             if (step + 1) % config.grad_accum_steps == 0:
                 # Gradient clipping
@@ -229,14 +229,13 @@ def _train_loop(
                 step_time = time.time() - step_start_time
                 step_start_time = time.time()
 
-                # Log training metrics
-                step_loss = loss.item() * config.grad_accum_steps
+                # Log training metrics (loss_value is per-example mean from last micro-batch)
                 step_acc = compute_accuracy(chosen_rewards, rejected_rewards)
                 current_lr = optimizer.param_groups[0]["lr"]
 
-                writer.add_scalar("train/loss", step_loss, global_step)
+                writer.add_scalar("train/loss", loss_value, global_step)
                 writer.add_scalar("train/accuracy", step_acc, global_step)
-                writer.add_scalar("train/loss_by_examples", step_loss, examples_seen)
+                writer.add_scalar("train/loss_by_examples", loss_value, examples_seen)
                 writer.add_scalar("train/accuracy_by_examples", step_acc, examples_seen)
                 writer.add_scalar("train/grad_norm", grad_norm, global_step)
                 writer.add_scalar("train/lr", current_lr, global_step)
@@ -263,11 +262,11 @@ def _train_loop(
             with torch.no_grad():
                 acc = compute_accuracy(chosen_rewards, rejected_rewards)
 
-            total_loss += loss.item() * config.grad_accum_steps
+            total_loss += loss_value
             total_acc += acc
             num_batches += 1
 
-            pbar.set_postfix({"loss": f"{loss.item() * config.grad_accum_steps:.4f}", "acc": f"{acc:.2%}"})
+            pbar.set_postfix({"loss": f"{loss_value:.4f}", "acc": f"{acc:.2%}"})
 
         avg_loss = total_loss / num_batches
         avg_acc = total_acc / num_batches
