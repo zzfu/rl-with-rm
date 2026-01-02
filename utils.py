@@ -51,18 +51,12 @@ def add_dataclass_args(
 
         # Add argument based on type
         if field_type == bool:
-            # Bool fields get --flag and --no_flag
+            # BooleanOptionalAction creates --flag and --no-flag with proper defaults
             parser.add_argument(
                 f"--{cli_name}",
-                action="store_true",
+                action=argparse.BooleanOptionalAction,
                 default=default,
-                help=f"Enable {field_name.replace('_', ' ')}",
-            )
-            parser.add_argument(
-                f"--no_{cli_name}",
-                action="store_false",
-                dest=cli_name,
-                help=f"Disable {field_name.replace('_', ' ')}",
+                help=f"{field_name.replace('_', ' ').capitalize()}",
             )
         else:
             parser.add_argument(
