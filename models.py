@@ -94,7 +94,7 @@ def load_policy_model(model_name: str = "Qwen/Qwen3-0.6B", **kwargs):
     """
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=kwargs.pop("torch_dtype", torch.bfloat16),
+        dtype=kwargs.pop("dtype", torch.bfloat16),
         **kwargs
     )
     return model
@@ -108,7 +108,7 @@ def load_reward_model(model_name: str = "Qwen/Qwen3-0.6B", **kwargs):
     """
     model = RewardModel.from_pretrained_base(
         model_name,
-        torch_dtype=kwargs.pop("torch_dtype", torch.bfloat16),
+        dtype=kwargs.pop("dtype", torch.bfloat16),
         **kwargs
     )
     return model
