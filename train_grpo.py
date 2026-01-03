@@ -114,7 +114,7 @@ class GRPOConfig:
 
     # Training
     epochs: int = 1
-    batch_size: int = 8  # prompts per batch
+    batch_size: int = 2  # prompts per batch
     group_size: int = 8  # completions per prompt
     lr: float = 1e-6
     grad_accum_steps: int = 4
@@ -125,6 +125,7 @@ class GRPOConfig:
     kl_coef: float = 0.05  # KL penalty coefficient
     cliprange: float = 0.2  # PPO clipping range
     normalize_advantages: bool = False  # Normalize within group
+    n_minibatches: int = field(default=1, metadata={"help": "Gradient steps per batch (reusing old_logprobs)"})
 
     # Generation
     temperature: float = 1.0
@@ -504,6 +505,9 @@ def _train_loop(
         accum_kl = 0.0
         accum_reward = 0.0
 
+        # Storage for batch data during gradient accumulation
+        stored_batches = []
+
         pbar = tqdm(range(steps_per_epoch * config.grad_accum_steps), desc="Training")
         for step in pbar:
             # Sample prompts
@@ -555,38 +559,14 @@ def _train_loop(
                     policy, full_ids, full_mask, prompt_lengths
                 )
 
-            # Forward pass with gradients
-            policy_logprobs = compute_logprobs(
-                policy, full_ids, full_mask, prompt_lengths
-            )
-
-            # PPO loss
-            ratio = (policy_logprobs - old_logprobs).exp()
-            clipped_ratio = ratio.clamp(1 - config.cliprange, 1 + config.cliprange)
-            policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
-
-            # KL penalty
-            kl_div = (ref_logprobs - policy_logprobs).mean()
-
-            # Total loss
-            loss = policy_loss + config.kl_coef * kl_div
-
-            # Backward
-            (loss / config.grad_accum_steps).backward()
-
-            # Accumulate for logging
-            accum_loss += loss.item()
-            accum_policy_loss += policy_loss.item()
-            accum_kl += kl_div.item()
+            # Accumulate reward for logging
             accum_reward += rewards.mean().item()
 
-            # Save rollouts asynchronously
+            # Save rollouts asynchronously (once per batch)
             if rollout_executor is not None:
-                # Decode prompts (strip left padding)
                 prompt_texts = tokenizer.batch_decode(
                     prompt_ids, skip_special_tokens=True
                 )
-                # Build rows: one per completion
                 rows = []
                 rewards_list = rewards.tolist()
                 advantages_list = advantages.tolist()
@@ -607,15 +587,64 @@ def _train_loop(
                     ))
                 rollout_executor.submit(save_rollouts_batch, rollout_db_path, rows)
 
-            # Optimizer step
-            if (step + 1) % config.grad_accum_steps == 0:
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    policy.parameters(),
-                    config.max_grad_norm if config.max_grad_norm > 0 else float("inf"),
-                ).item()
+            # Store batch data on CPU for later gradient computation
+            stored_batches.append({
+                "full_ids": full_ids.cpu(),
+                "full_mask": full_mask.cpu(),
+                "prompt_lengths": prompt_lengths.cpu(),
+                "old_logprobs": old_logprobs.cpu(),
+                "ref_logprobs": ref_logprobs.cpu(),
+                "advantages": advantages.cpu(),
+            })
 
-                optimizer.step()
-                optimizer.zero_grad()
+            # When accumulation complete, run n_minibatches updates over all stored data
+            if (step + 1) % config.grad_accum_steps == 0:
+                for inner_step in range(config.n_minibatches):
+                    # Accumulate gradients over all stored batches
+                    for batch_data in stored_batches:
+                        # Move batch data to GPU
+                        b_full_ids = batch_data["full_ids"].to(device)
+                        b_full_mask = batch_data["full_mask"].to(device)
+                        b_prompt_lengths = batch_data["prompt_lengths"].to(device)
+                        b_old_logprobs = batch_data["old_logprobs"].to(device)
+                        b_ref_logprobs = batch_data["ref_logprobs"].to(device)
+                        b_advantages = batch_data["advantages"].to(device)
+
+                        # Forward pass with gradients
+                        policy_logprobs = compute_logprobs(
+                            policy, b_full_ids, b_full_mask, b_prompt_lengths
+                        )
+
+                        # PPO loss
+                        ratio = (policy_logprobs - b_old_logprobs).exp()
+                        clipped_ratio = ratio.clamp(1 - config.cliprange, 1 + config.cliprange)
+                        policy_loss = -torch.min(ratio * b_advantages, clipped_ratio * b_advantages).mean()
+
+                        # KL penalty
+                        kl_div = (b_ref_logprobs - policy_logprobs).mean()
+
+                        # Total loss (divided by grad_accum_steps for proper averaging)
+                        loss = policy_loss + config.kl_coef * kl_div
+                        (loss / config.grad_accum_steps).backward()
+
+                        # Log metrics from last inner step, last batch
+                        if inner_step == config.n_minibatches - 1:
+                            accum_loss += loss.item()
+                            accum_policy_loss += policy_loss.item()
+                            accum_kl += kl_div.item()
+
+                    # Optimizer step after processing all batches
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        policy.parameters(),
+                        config.max_grad_norm if config.max_grad_norm > 0 else float("inf"),
+                    ).item()
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+                # Clear stored batches
+                stored_batches = []
+
+                # Update step counter and log
                 global_step += 1
                 examples_seen = global_step * effective_batch_size
 

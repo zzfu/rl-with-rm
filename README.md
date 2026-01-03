@@ -25,7 +25,7 @@ train_rm.py       # Reward model training script
 train_grpo.py     # GRPO policy training script
 quantize_rm.py    # RM quantization (INT8/INT4) and evaluation
 chat.py           # Gradio chatbot for testing models
-manage_runs.py    # Interactive tool to list/delete training runs
+manage_runs.py    # Interactive tool to manage RM+GRPO runs and snapshots
 utils.py          # CLI utilities
 ```
 
@@ -138,13 +138,17 @@ python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
 | `--model` | Qwen/Qwen3-0.6B | Policy base model |
 | `--reward_model_path` | (required) | Path to trained RM checkpoint |
 | `--epochs` | 1 | Number of epochs |
-| `--batch_size` | 4 | Prompts per batch |
-| `--group_size` | 4 | Completions per prompt |
+| `--batch_size` | 2 | Prompts per batch |
+| `--group_size` | 8 | Completions per prompt |
 | `--lr` | 1e-6 | Learning rate |
+| `--grad_accum_steps` | 4 | Gradient accumulation steps |
+| `--n_minibatches` | 1 | Gradient steps per batch (PPO-style reuse) |
 | `--kl_coef` | 0.05 | KL penalty coefficient |
 | `--cliprange` | 0.2 | PPO clipping range |
-| `--max_new_tokens` | 256 | Max tokens to generate |
-| `--temperature` | 0.7 | Sampling temperature |
+| `--max_new_tokens` | 512 | Max tokens to generate |
+| `--temperature` | 1.0 | Sampling temperature |
+| `--eval_steps` | 50 | Evaluate every N steps (-1 to disable) |
+| `--eval_num_prompts` | 128 | Prompts per evaluation |
 | `--output_dir` | ./checkpoints/grpo | Output directory |
 | `--log_dir` | ./logs/grpo | TensorBoard log directory |
 

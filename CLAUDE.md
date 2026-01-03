@@ -21,7 +21,7 @@ train_grpo.py     # GRPO policy training script
 quantize_rm.py    # RM quantization (INT8/INT4) and evaluation script
 chat.py           # Gradio chatbot UI for testing models
 utils.py          # CLI utilities (auto argparse from dataclass)
-manage_runs.py    # Interactive tool to list/delete training runs
+manage_runs.py    # Interactive tool to manage RM+GRPO runs and snapshots
 requirements.txt  # Python dependencies
 ```
 
@@ -58,14 +58,18 @@ requirements.txt  # Python dependencies
 - Trains policy using trained reward model
 - **Group sampling**: N completions per prompt, advantages computed within-group
 - **Loss**: PPO with clipped objective + KL penalty from frozen reference policy
-- **Key hyperparams**: `group_size=4`, `kl_coef=0.05`, `cliprange=0.2`
+- **Key hyperparams**: `group_size=8`, `kl_coef=0.05`, `cliprange=0.2`
 - Three models in memory: policy (trainable), ref_policy (frozen), reward_model (frozen)
 - `PromptDataset` extracts prompts from HH-RLHF with left-padding for generation
   - Uses mixed train/test splits (default: 1.5k train + 8.5k test = 10k) to reduce RM overfitting
+- **n_minibatches**: Multiple gradient steps per batch for PPO-style sample efficiency
+  - Batch data stored on CPU during grad accumulation, enabling both features together
+  - `old_logprobs` computed once, reused across minibatch updates (ratio diverges from 1)
 - **Rollout logging**: `--save_rollouts` saves all generations to SQLite for inspection
-  - Schema: step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage
+  - Training rollouts: step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage
+  - Eval rollouts: separate `eval_rollouts` table (no advantage column)
   - Async writes via ThreadPoolExecutor (non-blocking)
-  - ~10 KB/step, ~450 MB per full epoch
+- **eval_steps=-1** disables evaluation entirely (useful for quick testing)
 
 ### Quantization
 - Uses bitsandbytes for INT8/INT4 quantization
