@@ -15,7 +15,7 @@ import re
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
 import torch
@@ -80,9 +80,11 @@ class GRPOConfig:
     # Models
     policy_model_name: str = "Qwen/Qwen3-0.6B"
     reward_model_path: str = ""  # Required: path to trained RM checkpoint
-    max_length: int = 2048
-    max_new_tokens: int = 256
-    prompt_max_length: int = 512
+
+    # Sequence lengths
+    prompt_max_length: int = field(default=512, metadata={"help": "Max prompt tokens (longer prompts skipped)"})
+    max_new_tokens: int = field(default=256, metadata={"help": "Max tokens to generate per completion"})
+    max_length: int = field(default=2048, metadata={"help": "Truncation limit when tokenizing for RM scoring"})
 
     # Training
     epochs: int = 1

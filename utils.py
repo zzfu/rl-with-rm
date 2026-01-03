@@ -66,10 +66,15 @@ def add_dataclass_args(
                 # Optional type - use the non-None type
                 field_type = [a for a in args if a is not type(None)][0]
 
-        # Build help text with default
-        help_text = f"{field_name.replace('_', ' ').capitalize()}"
-        if default is not None and default != "":
-            help_text += f" (default: {default})"
+        # Build help text (use metadata["help"] if provided)
+        if field.metadata and "help" in field.metadata:
+            help_text = field.metadata["help"]
+            if default is not None and default != "":
+                help_text += f" (default: {default})"
+        elif default is not None and default != "":
+            help_text = f"(default: {default})"
+        else:
+            help_text = None
 
         # Add argument based on type (default=None to detect explicit CLI args)
         if field_type == bool:
