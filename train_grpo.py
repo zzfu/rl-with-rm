@@ -56,6 +56,19 @@ def init_rollouts_db(db_path: str) -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_step ON rollouts(step)")
+    # Eval rollouts table (no rollout_index or advantage - single completion per prompt)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS eval_rollouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            step INTEGER,
+            epoch INTEGER,
+            prompt_index INTEGER,
+            prompt TEXT,
+            completion TEXT,
+            reward REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_step ON eval_rollouts(step)")
     conn.commit()
     conn.close()
 
@@ -67,6 +80,19 @@ def save_rollouts_batch(db_path: str, rows: list) -> None:
         """INSERT INTO rollouts
            (step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_eval_rollouts_batch(db_path: str, rows: list) -> None:
+    """Save eval rollouts to database (called async from thread pool)."""
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        """INSERT INTO eval_rollouts
+           (step, epoch, prompt_index, prompt, completion, reward)
+           VALUES (?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()
@@ -106,7 +132,7 @@ class GRPOConfig:
     do_sample: bool = True
 
     # Evaluation & Checkpointing
-    eval_steps: int = 50
+    eval_steps: int = field(default=50, metadata={"help": "Evaluate every N steps (-1 to disable)"})
     eval_num_prompts: int = 128
     save_steps: int = 500
     output_dir: str = "./checkpoints/grpo"
@@ -276,6 +302,10 @@ def evaluate(
     dataset,
     config: GRPOConfig,
     num_prompts: int,
+    global_step: int,
+    epoch: int,
+    rollout_executor=None,
+    rollout_db_path: str = None,
 ):
     """Evaluate policy on held-out prompts."""
     policy.eval()
@@ -284,6 +314,7 @@ def evaluate(
     total_reward = 0.0
     total_kl = 0.0
     count = 0
+    prompt_index = 0
 
     num_batches = (num_prompts + config.batch_size - 1) // config.batch_size
     for _ in tqdm(range(num_batches), desc="Evaluating"):
@@ -327,6 +358,25 @@ def evaluate(
         total_reward += rewards.mean().item()
         total_kl += kl.item()
         count += 1
+
+        # Save eval rollouts asynchronously
+        if rollout_executor is not None:
+            prompt_texts = tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
+            rewards_list = rewards.tolist()
+            rows = []
+            for i, (prompt_text, comp_text, reward) in enumerate(
+                zip(prompt_texts, completion_texts, rewards_list)
+            ):
+                rows.append((
+                    global_step,
+                    epoch,
+                    prompt_index + i,
+                    prompt_text,
+                    comp_text,
+                    reward,
+                ))
+            rollout_executor.submit(save_eval_rollouts_batch, rollout_db_path, rows)
+            prompt_index += len(prompt_texts)
 
     return total_reward / count, total_kl / count
 
@@ -612,6 +662,10 @@ def _train_loop(
                         test_dataset,
                         config,
                         config.eval_num_prompts,
+                        global_step,
+                        epoch,
+                        rollout_executor,
+                        rollout_db_path,
                     )
                     print(f"\n[Step {global_step}] Eval - Reward: {eval_reward:.4f}, KL: {eval_kl:.4f}")
                     writer.add_scalar("eval/reward", eval_reward, global_step)
@@ -627,20 +681,25 @@ def _train_loop(
                     )
 
         # End of epoch evaluation
-        eval_reward, eval_kl = evaluate(
-            policy,
-            ref_policy,
-            reward_model,
-            tokenizer,
-            test_dataset,
-            config,
-            config.eval_num_prompts,
-        )
-        print(f"Epoch {epoch + 1} - Eval Reward: {eval_reward:.4f}, Eval KL: {eval_kl:.4f}")
-        examples_seen = global_step * effective_batch_size
-        writer.add_scalar("eval/reward", eval_reward, global_step)
-        writer.add_scalar("eval/kl_div", eval_kl, global_step)
-        writer.add_scalar("eval/reward_by_examples", eval_reward, examples_seen)
+        if config.eval_steps >= 0:
+            eval_reward, eval_kl = evaluate(
+                policy,
+                ref_policy,
+                reward_model,
+                tokenizer,
+                test_dataset,
+                config,
+                config.eval_num_prompts,
+                global_step,
+                epoch,
+                rollout_executor,
+                rollout_db_path,
+            )
+            print(f"Epoch {epoch + 1} - Eval Reward: {eval_reward:.4f}, Eval KL: {eval_kl:.4f}")
+            examples_seen = global_step * effective_batch_size
+            writer.add_scalar("eval/reward", eval_reward, global_step)
+            writer.add_scalar("eval/kl_div", eval_kl, global_step)
+            writer.add_scalar("eval/reward_by_examples", eval_reward, examples_seen)
 
     # Save final model
     save_checkpoint(policy, tokenizer, optimizer, config, output_dir, global_step, config.epochs)
