@@ -11,9 +11,9 @@ from pathlib import Path
 
 # Directories to scan
 RUN_DIRS = [
-    {"type": "RM", "checkpoints": "./checkpoints/rm", "logs": "./logs/rm"},
-    {"type": "GRPO", "checkpoints": "./checkpoints/grpo", "logs": "./logs/grpo"},
-    {"type": "QUANT", "checkpoints": "./quantized_models", "logs": None},
+    {"type": "RM", "checkpoints": "./checkpoints/rm", "logs": "./logs/rm", "rollouts": None},
+    {"type": "GRPO", "checkpoints": "./checkpoints/grpo", "logs": "./logs/grpo", "rollouts": "./rollouts"},
+    {"type": "QUANT", "checkpoints": "./quantized_models", "logs": None, "rollouts": None},
 ]
 
 
@@ -40,7 +40,7 @@ def get_runs() -> dict:
     Scan checkpoint and log directories to find all runs.
 
     Returns:
-        dict mapping run_name -> {"checkpoints": Path|None, "logs": Path|None, "type": str, ...}
+        dict mapping run_name -> {"checkpoints": Path|None, "logs": Path|None, "rollouts": Path|None, "type": str, ...}
     """
     runs = {}
 
@@ -48,6 +48,7 @@ def get_runs() -> dict:
         run_type = run_dir_config["type"]
         checkpoint_path = Path(run_dir_config["checkpoints"])
         log_path = Path(run_dir_config["logs"]) if run_dir_config["logs"] else None
+        rollouts_path = Path(run_dir_config["rollouts"]) if run_dir_config["rollouts"] else None
 
         # Scan checkpoints
         if checkpoint_path.exists():
@@ -61,8 +62,10 @@ def get_runs() -> dict:
                         "type": run_type,
                         "checkpoints": run_dir,
                         "logs": None,
+                        "rollouts": None,
                         "checkpoint_size": get_dir_size(run_dir),
                         "log_size": 0,
+                        "rollouts_size": 0,
                     }
 
         # Scan logs
@@ -80,13 +83,36 @@ def get_runs() -> dict:
                             "type": run_type,
                             "checkpoints": None,
                             "logs": run_dir,
+                            "rollouts": None,
                             "checkpoint_size": 0,
                             "log_size": get_dir_size(run_dir),
+                            "rollouts_size": 0,
+                        }
+
+        # Scan rollouts
+        if rollouts_path and rollouts_path.exists():
+            for run_dir in rollouts_path.iterdir():
+                if run_dir.is_dir():
+                    run_name = run_dir.name
+                    key = f"{run_type}:{run_name}"
+                    if key in runs:
+                        runs[key]["rollouts"] = run_dir
+                        runs[key]["rollouts_size"] = get_dir_size(run_dir)
+                    else:
+                        runs[key] = {
+                            "name": run_name,
+                            "type": run_type,
+                            "checkpoints": None,
+                            "logs": None,
+                            "rollouts": run_dir,
+                            "checkpoint_size": 0,
+                            "log_size": 0,
+                            "rollouts_size": get_dir_size(run_dir),
                         }
 
     # Add total size and modified time
     for key, info in runs.items():
-        info["total_size"] = info["checkpoint_size"] + info["log_size"]
+        info["total_size"] = info["checkpoint_size"] + info["log_size"] + info["rollouts_size"]
 
         # Get most recent modification time
         mtime = 0
@@ -94,6 +120,8 @@ def get_runs() -> dict:
             mtime = max(mtime, info["checkpoints"].stat().st_mtime)
         if info["logs"]:
             mtime = max(mtime, info["logs"].stat().st_mtime)
+        if info["rollouts"]:
+            mtime = max(mtime, info["rollouts"].stat().st_mtime)
         info["mtime"] = mtime
 
     return runs
@@ -151,13 +179,14 @@ def list_runs(runs: dict, marked: set, snapshot_deletions: dict = None) -> list:
     sorted_items = sorted(runs.items(), key=lambda x: x[1]["mtime"], reverse=True)
     sorted_keys = [k for k, _ in sorted_items]
 
-    print("\n" + "=" * 80)
-    print(f"{'#':<4} {'Type':<6} {'Run Name':<30} {'Size':<10} {'Ckpt':<5} {'Logs':<5} {'Del?':<5}")
-    print("=" * 80)
+    print("\n" + "=" * 85)
+    print(f"{'#':<4} {'Type':<6} {'Run Name':<30} {'Size':<10} {'Ckpt':<5} {'Logs':<5} {'Roll':<5} {'Del?':<5}")
+    print("=" * 85)
 
     for i, (key, info) in enumerate(sorted_items, 1):
         ckpt = "Y" if info["checkpoints"] else "-"
         logs = "Y" if info["logs"] else "-"
+        roll = "Y" if info.get("rollouts") else "-"
         # [X] = full run, [~] = some snapshots, [ ] = nothing
         if key in marked:
             marked_str = "[X]"
@@ -170,9 +199,9 @@ def list_runs(runs: dict, marked: set, snapshot_deletions: dict = None) -> list:
         # Truncate run name if too long
         display_name = info["name"][:29] if len(info["name"]) > 29 else info["name"]
 
-        print(f"{i:<4} {info['type']:<6} {display_name:<30} {size_str:<10} {ckpt:<5} {logs:<5} {marked_str:<5}")
+        print(f"{i:<4} {info['type']:<6} {display_name:<30} {size_str:<10} {ckpt:<5} {logs:<5} {roll:<5} {marked_str:<5}")
 
-    print("=" * 80)
+    print("=" * 85)
     print(f"Total: {len(runs)} runs, {format_size(sum(r['total_size'] for r in runs.values()))}")
     if marked:
         marked_size = sum(runs[r]["total_size"] for r in marked if r in runs)
@@ -399,6 +428,8 @@ def delete_runs(runs: dict, to_delete: set) -> None:
                 shutil.rmtree(info["checkpoints"])
             if info["logs"] and info["logs"].exists():
                 shutil.rmtree(info["logs"])
+            if info.get("rollouts") and info["rollouts"].exists():
+                shutil.rmtree(info["rollouts"])
             print("done")
         except Exception as e:
             print(f"error: {e}")
@@ -438,6 +469,8 @@ def main():
                 print(f"      {info['checkpoints']}")
             if info["logs"]:
                 print(f"      {info['logs']}")
+            if info.get("rollouts"):
+                print(f"      {info['rollouts']}")
 
     # Show snapshots to delete
     if snapshot_deletions:
