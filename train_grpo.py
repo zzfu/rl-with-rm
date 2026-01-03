@@ -82,14 +82,14 @@ class GRPOConfig:
     reward_model_path: str = ""  # Required: path to trained RM checkpoint
 
     # Sequence lengths
-    prompt_max_length: int = field(default=512, metadata={"help": "Max prompt tokens (longer prompts skipped)"})
-    max_new_tokens: int = field(default=256, metadata={"help": "Max tokens to generate per completion"})
+    prompt_max_length: int = field(default=1536, metadata={"help": "Max prompt tokens (longer prompts skipped)"})
+    max_new_tokens: int = field(default=512, metadata={"help": "Max tokens to generate per completion"})
     max_length: int = field(default=2048, metadata={"help": "Truncation limit when tokenizing for RM scoring"})
 
     # Training
     epochs: int = 1
-    batch_size: int = 4  # prompts per batch
-    group_size: int = 4  # completions per prompt
+    batch_size: int = 8  # prompts per batch
+    group_size: int = 8  # completions per prompt
     lr: float = 1e-6
     grad_accum_steps: int = 4
     max_grad_norm: float = 1.0
@@ -98,10 +98,10 @@ class GRPOConfig:
     # GRPO hyperparameters
     kl_coef: float = 0.05  # KL penalty coefficient
     cliprange: float = 0.2  # PPO clipping range
-    normalize_advantages: bool = True  # Normalize within group
+    normalize_advantages: bool = False  # Normalize within group
 
     # Generation
-    temperature: float = 0.7
+    temperature: float = 1.0
     top_p: float = 0.9
     do_sample: bool = True
 
