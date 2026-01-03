@@ -714,14 +714,16 @@ def main():
         p.requires_grad = False
     print("Reward model frozen")
 
-    # Load datasets
+    # Load datasets (mixed train/test for GRPO to reduce RM overfitting)
     print("Loading datasets...")
     train_dataset = PromptDataset(
-        tokenizer, split="train", max_length=config.prompt_max_length
+        tokenizer,
+        train_samples=1500,
+        test_samples=8500,
+        max_length=config.prompt_max_length,
     )
-    test_dataset = PromptDataset(
-        tokenizer, split="test", max_length=config.prompt_max_length
-    )
+    # Use same dataset for eval (we're using all test data in training anyway)
+    test_dataset = train_dataset
 
     train(
         policy=policy,

@@ -8,7 +8,7 @@ import random
 import re
 import torch
 from torch.utils.data import Dataset
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 
 
 def parse_hh_dialogue(text: str) -> list[dict]:
@@ -223,26 +223,47 @@ class PromptDataset(Dataset):
     Prompt-only dataset for GRPO training.
 
     Extracts user prompts from HH-RLHF for policy model generation.
+    Supports mixing train/test splits to reduce overfitting to RM training data.
     """
 
     def __init__(
         self,
         tokenizer,
-        split: str = "train",
+        train_samples: int = 1500,
+        test_samples: int = 8500,
         max_length: int = 512,
     ):
         """
         Args:
             tokenizer: HuggingFace tokenizer
-            split: "train" or "test"
+            train_samples: Number of samples from train split (0 to skip)
+            test_samples: Number of samples from test split (0 to skip)
             max_length: Maximum prompt length (longer prompts skipped in sampling)
         """
         self.tokenizer = tokenizer
         self.max_length = max_length
 
-        print(f"Loading hh-rlhf dataset for prompts (split={split})...")
-        self.dataset = load_dataset("Anthropic/hh-rlhf", split=split)
-        print(f"Loaded {len(self.dataset)} examples")
+        print(f"Loading hh-rlhf prompts (train={train_samples}, test={test_samples})...")
+        datasets_to_combine = []
+
+        if train_samples > 0:
+            train = load_dataset("Anthropic/hh-rlhf", split="train")
+            train = train.shuffle(seed=42).select(range(min(train_samples, len(train))))
+            datasets_to_combine.append(train)
+            print(f"  Train: {len(train)} samples")
+
+        if test_samples > 0:
+            test = load_dataset("Anthropic/hh-rlhf", split="test")
+            test = test.shuffle(seed=42).select(range(min(test_samples, len(test))))
+            datasets_to_combine.append(test)
+            print(f"  Test: {len(test)} samples")
+
+        if not datasets_to_combine:
+            raise ValueError("Must have at least one of train_samples or test_samples > 0")
+
+        # Combine and shuffle to mix train/test
+        self.dataset = concatenate_datasets(datasets_to_combine).shuffle(seed=42)
+        print(f"  Total: {len(self.dataset)} samples (shuffled)")
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -406,7 +427,7 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 50)
     print("Testing PromptDataset...")
-    prompt_dataset = PromptDataset(tokenizer, split="train", max_length=512)
+    prompt_dataset = PromptDataset(tokenizer, train_samples=100, test_samples=100, max_length=512)
     print(f"Prompt dataset size: {len(prompt_dataset)}")
 
     print("\nSample prompt batch (size=4):")

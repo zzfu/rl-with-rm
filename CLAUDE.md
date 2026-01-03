@@ -60,6 +60,7 @@ requirements.txt  # Python dependencies
 - **Key hyperparams**: `group_size=4`, `kl_coef=0.05`, `cliprange=0.2`
 - Three models in memory: policy (trainable), ref_policy (frozen), reward_model (frozen)
 - `PromptDataset` extracts prompts from HH-RLHF with left-padding for generation
+  - Uses mixed train/test splits (default: 1.5k train + 8.5k test = 10k) to reduce RM overfitting
 - **Rollout logging**: `--save_rollouts` saves all generations to SQLite for inspection
   - Schema: step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage
   - Async writes via ThreadPoolExecutor (non-blocking)
