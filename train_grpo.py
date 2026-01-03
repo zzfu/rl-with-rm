@@ -28,7 +28,7 @@ from models import (
     RewardModel,
 )
 from data import PromptDataset
-from utils import add_dataclass_args, build_config_from_args
+from utils import add_dataclass_args, build_config_from_args, print_config
 
 
 def strip_think_tags(text: str) -> str:
@@ -324,20 +324,11 @@ def train(
         else:
             print(f"Warning: No training_state.pt found, starting fresh")
 
-    print(f"\nGRPO Training config:")
-    print(f"  Run name: {run_name}")
-    print(f"  Epochs: {config.epochs}")
-    print(f"  Batch size: {config.batch_size} prompts")
-    print(f"  Group size: {config.group_size} completions/prompt")
-    print(f"  Gradient accumulation: {config.grad_accum_steps}")
-    print(f"  Effective batch size: {effective_batch_size} completions")
-    print(f"  Learning rate: {config.lr}")
-    print(f"  KL coefficient: {config.kl_coef}")
-    print(f"  Clip range: {config.cliprange}")
+    print_config(config, "GRPO Training config")
+    print(f"\n  Effective batch size: {effective_batch_size} completions")
     print(f"  Output dir: {output_dir}")
     print(f"  Log dir: {log_dir}")
-    print()
-    print(f"To monitor training, run: tensorboard --logdir {log_dir}")
+    print(f"\nTo monitor training, run: tensorboard --logdir {log_dir}")
     print()
 
     try:

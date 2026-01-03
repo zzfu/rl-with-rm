@@ -4,8 +4,15 @@ Utility functions for the rl-with-rm project.
 
 import argparse
 import json
-from dataclasses import fields, MISSING
+from dataclasses import fields, asdict, MISSING
 from typing import get_origin, get_args
+
+
+def print_config(config, title: str = "Config"):
+    """Print all config fields in a readable format."""
+    print(f"\n{title}:")
+    for key, value in asdict(config).items():
+        print(f"  {key}: {value}")
 
 
 def add_dataclass_args(

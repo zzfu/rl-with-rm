@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from models import load_reward_model, load_reward_model_lora, load_tokenizer
 from data import HHRLHFDataset
-from utils import add_dataclass_args, build_config_from_args
+from utils import add_dataclass_args, build_config_from_args, print_config
 
 
 @dataclass
@@ -158,20 +158,11 @@ def train(
         else:
             print(f"Warning: No training_state.pt found in {config.resume_from}, starting fresh")
 
-    print(f"\nTraining config:")
-    print(f"  Run name: {run_name}")
-    print(f"  Epochs: {config.epochs}")
-    print(f"  Batch size: {config.batch_size}")
-    print(f"  Gradient accumulation: {config.grad_accum_steps}")
-    print(f"  Effective batch size: {config.batch_size * config.grad_accum_steps}")
-    print(f"  Learning rate: {config.lr}")
-    print(f"  Gradient clipping: {config.max_grad_norm}" if config.max_grad_norm > 0 else "  Gradient clipping: disabled")
-    print(f"  Eval every: {config.eval_steps} steps" if config.eval_steps > 0 else "  Eval: end of epoch only")
-    print(f"  Save every: {config.save_steps} steps" if config.save_steps > 0 else "  Save: end of training only")
+    print_config(config, "Training config")
+    print(f"\n  Effective batch size: {config.batch_size * config.grad_accum_steps}")
     print(f"  Output dir: {output_dir}")
     print(f"  Log dir: {log_dir}")
-    print()
-    print(f"To monitor training, run: tensorboard --logdir {log_dir}")
+    print(f"\nTo monitor training, run: tensorboard --logdir {log_dir}")
     print()
 
     try:
