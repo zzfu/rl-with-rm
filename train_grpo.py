@@ -184,9 +184,9 @@ def compute_logprobs(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     prompt_lengths: torch.Tensor,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Compute sum of log probabilities for completion tokens only.
+    Compute per-token log probabilities for completion tokens.
 
     Args:
         model: Policy model
@@ -195,7 +195,8 @@ def compute_logprobs(
         prompt_lengths: Length of each prompt [batch_size]
 
     Returns:
-        Sum of log probs for completion tokens [batch_size]
+        token_log_probs: Per-token log probs [batch_size, seq_len-1]
+        completion_mask: Mask for completion tokens [batch_size, seq_len-1]
     """
     outputs = model(input_ids=input_ids, attention_mask=attention_mask)
     logits = outputs.logits[:, :-1, :]  # [batch, seq_len-1, vocab]
@@ -214,8 +215,7 @@ def compute_logprobs(
     # Also mask padding
     completion_mask = completion_mask * attention_mask[:, 1:]
 
-    # Sum log probs over completion tokens
-    return (token_log_probs * completion_mask).sum(dim=-1)
+    return token_log_probs, completion_mask
 
 
 def compute_group_advantages(
@@ -576,15 +576,15 @@ def _train_loop(
                     rewards, config.group_size, normalize=config.normalize_advantages
                 )
 
-                # Get reference log probs
+                # Get reference log probs (per-token)
                 vlog(config.verbose, global_step, "Computing ref policy logprobs...", accum_step, config.grad_accum_steps)
-                ref_logprobs = compute_logprobs(
+                ref_logprobs, completion_mask = compute_logprobs(
                     ref_policy, full_ids, full_mask, prompt_lengths
                 )
 
-                # Get old log probs (for PPO ratio)
+                # Get old log probs (per-token, for PPO ratio)
                 vlog(config.verbose, global_step, "Computing old policy logprobs...", accum_step, config.grad_accum_steps)
-                old_logprobs = compute_logprobs(
+                old_logprobs, _ = compute_logprobs(
                     policy, full_ids, full_mask, prompt_lengths
                 )
 
@@ -623,6 +623,7 @@ def _train_loop(
                 "prompt_lengths": prompt_lengths.cpu(),
                 "old_logprobs": old_logprobs.cpu(),
                 "ref_logprobs": ref_logprobs.cpu(),
+                "completion_mask": completion_mask.cpu(),
                 "advantages": advantages.cpu(),
             })
             # Free GPU cache to prevent VRAM accumulation during grad accum
@@ -640,20 +641,28 @@ def _train_loop(
                         b_prompt_lengths = batch_data["prompt_lengths"].to(device)
                         b_old_logprobs = batch_data["old_logprobs"].to(device)
                         b_ref_logprobs = batch_data["ref_logprobs"].to(device)
+                        b_completion_mask = batch_data["completion_mask"].to(device)
                         b_advantages = batch_data["advantages"].to(device)
 
-                        # Forward pass with gradients
-                        policy_logprobs = compute_logprobs(
+                        # Forward pass with gradients (per-token log probs)
+                        policy_logprobs, _ = compute_logprobs(
                             policy, b_full_ids, b_full_mask, b_prompt_lengths
                         )
 
-                        # PPO loss
+                        # Per-token PPO ratio (stays close to 1.0)
                         ratio = (policy_logprobs - b_old_logprobs).exp()
                         clipped_ratio = ratio.clamp(1 - config.cliprange, 1 + config.cliprange)
-                        policy_loss = -torch.min(ratio * b_advantages, clipped_ratio * b_advantages).mean()
 
-                        # KL penalty
-                        kl_div = (b_ref_logprobs - policy_logprobs).mean()
+                        # Per-token PPO loss, broadcast advantages to token level
+                        # b_advantages: [batch], need to expand to [batch, seq_len]
+                        adv_expanded = b_advantages.unsqueeze(1)  # [batch, 1]
+                        per_token_loss = -torch.min(ratio * adv_expanded, clipped_ratio * adv_expanded)
+                        # Masked average over completion tokens
+                        policy_loss = (per_token_loss * b_completion_mask).sum() / b_completion_mask.sum()
+
+                        # Per-token KL penalty, masked average
+                        per_token_kl = b_ref_logprobs - policy_logprobs
+                        kl_div = (per_token_kl * b_completion_mask).sum() / b_completion_mask.sum()
 
                         # Total loss (divided by grad_accum_steps for proper averaging)
                         loss = policy_loss + config.kl_coef * kl_div
