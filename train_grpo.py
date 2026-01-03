@@ -12,7 +12,9 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
@@ -34,6 +36,41 @@ from utils import add_dataclass_args, build_config_from_args, print_config
 def strip_think_tags(text: str) -> str:
     """Strip thinking tags for RM scoring (matches data.py behavior)."""
     return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+
+
+def init_rollouts_db(db_path: str) -> None:
+    """Initialize SQLite database for rollout logging."""
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rollouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            step INTEGER,
+            epoch INTEGER,
+            prompt_index INTEGER,
+            rollout_index INTEGER,
+            prompt TEXT,
+            completion TEXT,
+            reward REAL,
+            advantage REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_step ON rollouts(step)")
+    conn.commit()
+    conn.close()
+
+
+def save_rollouts_batch(db_path: str, rows: list) -> None:
+    """Save a batch of rollouts to the database (called async from thread pool)."""
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        """INSERT INTO rollouts
+           (step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    conn.commit()
+    conn.close()
 
 
 @dataclass
@@ -83,6 +120,10 @@ class GRPOConfig:
     lora_alpha: int = 32
     lora_dropout: float = 0.05
     lora_target_modules: str = "q_proj,k_proj,v_proj,o_proj"
+
+    # Rollout logging
+    save_rollouts: bool = False
+    rollouts_dir: str = "./rollouts"
 
 
 def compute_logprobs(
@@ -310,6 +351,15 @@ def train(
     writer = SummaryWriter(log_dir=log_dir)
     effective_batch_size = config.batch_size * config.group_size * config.grad_accum_steps
 
+    # Initialize rollout logging
+    rollout_executor = None
+    rollout_db_path = None
+    if config.save_rollouts:
+        rollout_db_path = os.path.join(config.rollouts_dir, run_name, "rollouts.db")
+        init_rollouts_db(rollout_db_path)
+        rollout_executor = ThreadPoolExecutor(max_workers=1)
+        print(f"Rollout logging enabled: {rollout_db_path}")
+
     # Resume from checkpoint
     global_step = 0
     start_epoch = 0
@@ -347,6 +397,8 @@ def train(
             effective_batch_size,
             global_step,
             start_epoch,
+            rollout_executor,
+            rollout_db_path,
         )
     except KeyboardInterrupt:
         print("\n\nTraining interrupted by user.")
@@ -359,6 +411,8 @@ def train(
         raise
     finally:
         writer.close()
+        if rollout_executor:
+            rollout_executor.shutdown(wait=True)
 
 
 def _train_loop(
@@ -375,6 +429,8 @@ def _train_loop(
     effective_batch_size,
     global_step,
     start_epoch,
+    rollout_executor,
+    rollout_db_path,
 ):
     """Inner training loop."""
     device = next(policy.parameters()).device
@@ -470,6 +526,33 @@ def _train_loop(
             accum_policy_loss += policy_loss.item()
             accum_kl += kl_div.item()
             accum_reward += rewards.mean().item()
+
+            # Save rollouts asynchronously
+            if rollout_executor is not None:
+                # Decode prompts (strip left padding)
+                prompt_texts = tokenizer.batch_decode(
+                    prompt_ids, skip_special_tokens=True
+                )
+                # Build rows: one per completion
+                rows = []
+                rewards_list = rewards.tolist()
+                advantages_list = advantages.tolist()
+                for i, (comp_text, reward, advantage) in enumerate(
+                    zip(completion_texts, rewards_list, advantages_list)
+                ):
+                    prompt_idx = i // config.group_size
+                    rollout_idx = i % config.group_size
+                    rows.append((
+                        global_step,
+                        epoch,
+                        prompt_idx,
+                        rollout_idx,
+                        prompt_texts[prompt_idx],
+                        comp_text,
+                        reward,
+                        advantage,
+                    ))
+                rollout_executor.submit(save_rollouts_batch, rollout_db_path, rows)
 
             # Optimizer step
             if (step + 1) % config.grad_accum_steps == 0:

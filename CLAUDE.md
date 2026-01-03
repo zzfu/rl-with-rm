@@ -60,6 +60,10 @@ requirements.txt  # Python dependencies
 - **Key hyperparams**: `group_size=4`, `kl_coef=0.05`, `cliprange=0.2`
 - Three models in memory: policy (trainable), ref_policy (frozen), reward_model (frozen)
 - `PromptDataset` extracts prompts from HH-RLHF with left-padding for generation
+- **Rollout logging**: `--save_rollouts` saves all generations to SQLite for inspection
+  - Schema: step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage
+  - Async writes via ThreadPoolExecutor (non-blocking)
+  - ~10 KB/step, ~450 MB per full epoch
 
 ### Dataset
 - **Anthropic/hh-rlhf**: Human preference data (chosen/rejected pairs)
