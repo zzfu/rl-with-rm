@@ -162,10 +162,10 @@ class GRPOConfig:
 
 
 def get_vram_usage() -> str:
-    """Get current VRAM usage as string."""
+    """Get current VRAM usage as string (reserved by PyTorch)."""
     if torch.cuda.is_available():
-        used = torch.cuda.memory_allocated() / 1024**3
-        return f"[VRAM: {used:.1f}GB]"
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        return f"[VRAM: {reserved:.1f}GB]"
     return ""
 
 
