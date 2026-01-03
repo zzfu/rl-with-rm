@@ -162,10 +162,11 @@ class GRPOConfig:
 
 
 def get_vram_usage() -> str:
-    """Get current VRAM usage as string (reserved by PyTorch)."""
+    """Get current VRAM usage as string (allocated/reserved)."""
     if torch.cuda.is_available():
+        alloc = torch.cuda.memory_allocated() / 1024**3
         reserved = torch.cuda.memory_reserved() / 1024**3
-        return f"[VRAM: {reserved:.1f}GB]"
+        return f"[VRAM: {alloc:.1f}/{reserved:.1f}GB]"
     return ""
 
 
@@ -624,6 +625,8 @@ def _train_loop(
                 "ref_logprobs": ref_logprobs.cpu(),
                 "advantages": advantages.cpu(),
             })
+            # Free GPU cache to prevent VRAM accumulation during grad accum
+            torch.cuda.empty_cache()
 
             # When accumulation complete, run n_minibatches updates over all stored data
             if (step + 1) % config.grad_accum_steps == 0:
