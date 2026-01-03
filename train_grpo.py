@@ -22,6 +22,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from transformers import BitsAndBytesConfig
 
 from models import (
     load_policy_model,
@@ -106,6 +107,7 @@ class GRPOConfig:
     # Models
     policy_model_name: str = "Qwen/Qwen3-0.6B"
     reward_model_path: str = ""  # Required: path to trained RM checkpoint
+    rm_quant_type: str = field(default="", metadata={"help": "RM quantization: '' (none), 'int8', or 'int4'"})
 
     # Sequence lengths
     prompt_max_length: int = field(default=1536, metadata={"help": "Max prompt tokens (longer prompts skipped)"})
@@ -791,13 +793,32 @@ def main():
         p.requires_grad = False
     print("Reference policy frozen")
 
-    # Load reward model
-    print(f"Loading reward model from {config.reward_model_path}...")
-    reward_model = RewardModel.from_pretrained(
-        config.reward_model_path,
-        dtype=torch.bfloat16,
-        device_map="auto",
-    )
+    # Load reward model (optionally quantized)
+    if config.rm_quant_type:
+        print(f"Loading reward model from {config.reward_model_path} ({config.rm_quant_type})...")
+        if config.rm_quant_type == "int8":
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+        elif config.rm_quant_type == "int4":
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+        else:
+            raise ValueError(f"Unknown rm_quant_type: {config.rm_quant_type}. Use '', 'int8', or 'int4'.")
+        reward_model = RewardModel.from_pretrained(
+            config.reward_model_path,
+            quantization_config=quantization_config,
+            device_map="auto",
+        )
+    else:
+        print(f"Loading reward model from {config.reward_model_path}...")
+        reward_model = RewardModel.from_pretrained(
+            config.reward_model_path,
+            dtype=torch.bfloat16,
+            device_map="auto",
+        )
     reward_model.eval()
     for p in reward_model.parameters():
         p.requires_grad = False
