@@ -24,6 +24,7 @@ data.py           # HH-RLHF dataset loader (preference pairs + prompts)
 train_rm.py       # Reward model training script
 train_grpo.py     # GRPO policy training script
 quantize_rm.py    # RM quantization (INT8/INT4) and evaluation
+quantize_policy.py # Policy quantization with KL divergence evaluation
 chat.py           # Gradio chatbot for testing models
 manage_runs.py    # Interactive tool to manage RM+GRPO runs and snapshots
 utils.py          # CLI utilities
@@ -199,6 +200,37 @@ The script:
 | `--eval_batch_size` | 4 | Evaluation batch size |
 | `--eval_num_batches` | 500 | Number of batches (~2000 examples) |
 | `--max_length` | 2048 | Max sequence length |
+| `--skip_save` | False | Skip saving quantized model |
+
+## Policy Quantization
+
+Quantize a policy model and evaluate KL divergence vs original:
+
+```bash
+# From a GRPO checkpoint
+python quantize_policy.py --model ./checkpoints/grpo/run_name/step-1000
+
+# From a base model (e.g., to test before training)
+python quantize_policy.py --model Qwen/Qwen3-0.6B --quant_type int4
+```
+
+The script:
+1. Generates completions with the original bf16 model
+2. Computes log probabilities from both models on generated tokens
+3. Reports KL divergence: `KL(original || quantized)`
+
+For checkpoints, outputs go to `checkpoint/quantized_{int8|int4}/`. For base models, outputs go to `./quantized_models/`.
+
+### Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--model` | (required) | Model name or checkpoint path |
+| `--quant_type` | int8 | Quantization type: `int8` or `int4` |
+| `--num_prompts` | 100 | Number of prompts to evaluate |
+| `--max_new_tokens` | 512 | Max tokens to generate per prompt |
+| `--temperature` | 1.0 | Sampling temperature |
+| `--prompt_max_length` | 1536 | Max prompt length |
 | `--skip_save` | False | Skip saving quantized model |
 
 ## Chat Interface

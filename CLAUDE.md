@@ -19,6 +19,7 @@ data.py           # HH-RLHF dataset loader (preference pairs + prompts)
 train_rm.py       # Reward model training script (full-param and LoRA)
 train_grpo.py     # GRPO policy training script
 quantize_rm.py    # RM quantization (INT8/INT4) and evaluation script
+quantize_policy.py # Policy quantization with KL divergence evaluation
 chat.py           # Gradio chatbot UI for testing models
 utils.py          # CLI utilities (auto argparse from dataclass)
 manage_runs.py    # Interactive tool to manage RM+GRPO runs and snapshots
@@ -74,8 +75,9 @@ requirements.txt  # Python dependencies
 ### Quantization
 - Uses bitsandbytes for INT8/INT4 quantization
 - INT4 uses NF4 (Normal Float 4) with double quantization for best quality
-- `quantize_rm.py` compares original vs quantized on full test set
-- Outputs saved to `checkpoint/quantized_{int8|int4}/` subfolder
+- `quantize_rm.py` compares original vs quantized RM on test set (accuracy)
+- `quantize_policy.py` compares original vs quantized policy (KL divergence on generated tokens)
+- Outputs saved to `checkpoint/quantized_{int8|int4}/` subfolder (or `quantized_models/` for base models)
 
 ### Dataset
 - **Anthropic/hh-rlhf**: Human preference data (chosen/rejected pairs)

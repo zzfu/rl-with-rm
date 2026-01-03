@@ -211,3 +211,4 @@ checkpoints/
 logs/
 tmp/
 rollouts/
+quantized_models/
