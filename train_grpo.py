@@ -660,8 +660,9 @@ def _train_loop(
                         # Masked average over completion tokens
                         policy_loss = (per_token_loss * b_completion_mask).sum() / b_completion_mask.sum()
 
-                        # Per-token KL penalty, masked average
-                        per_token_kl = b_ref_logprobs - policy_logprobs
+                        # Per-token KL penalty (GRPO estimator: always ≥ 0, lower variance)
+                        log_ratio = b_ref_logprobs - policy_logprobs  # log(π_ref/π_policy)
+                        per_token_kl = torch.exp(log_ratio) - log_ratio - 1
                         kl_div = (per_token_kl * b_completion_mask).sum() / b_completion_mask.sum()
 
                         # Total loss (divided by grad_accum_steps for proper averaging)
