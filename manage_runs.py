@@ -98,6 +98,24 @@ def get_runs() -> dict:
     return runs
 
 
+def get_quantized_subfolders(snapshot_path: Path) -> list:
+    """Get list of quantized subfolders within a snapshot."""
+    quantized = []
+    if snapshot_path.exists():
+        for item in snapshot_path.iterdir():
+            if item.is_dir() and item.name.startswith("quantized_"):
+                quant_type = item.name.replace("quantized_", "")
+                quantized.append({
+                    "name": item.name,
+                    "path": item,
+                    "type": quant_type,
+                    "size": get_dir_size(item),
+                })
+    # Sort by name
+    quantized.sort(key=lambda x: x["name"])
+    return quantized
+
+
 def get_snapshots(run_info: dict) -> list:
     """Get list of snapshots (step-X directories) for a run."""
     snapshots = []
@@ -106,11 +124,13 @@ def get_snapshots(run_info: dict) -> list:
             if item.is_dir() and item.name.startswith("step-"):
                 try:
                     step_num = int(item.name.split("-")[1])
+                    quantized = get_quantized_subfolders(item)
                     snapshots.append({
                         "name": item.name,
                         "path": item,
                         "step": step_num,
                         "size": get_dir_size(item),
+                        "quantized": quantized,
                     })
                 except (ValueError, IndexError):
                     pass
@@ -161,24 +181,60 @@ def list_runs(runs: dict, marked: set, snapshot_deletions: dict = None) -> list:
     return sorted_keys
 
 
-def list_snapshots(run_info: dict, snapshots: list, marked: set) -> None:
-    """Display snapshots for a run."""
+def build_snapshot_index(snapshots: list) -> list:
+    """
+    Build a flat index of markable items from snapshots.
+
+    Returns list of dicts with keys: id (e.g. "1", "1a"), key (for marked set),
+    name (display), path, size, is_quantized.
+    """
+    index = []
+    for i, snap in enumerate(snapshots, 1):
+        # Full snapshot entry
+        index.append({
+            "id": str(i),
+            "key": snap["name"],
+            "name": snap["name"],
+            "path": snap["path"],
+            "size": snap["size"],
+            "is_quantized": False,
+        })
+        # Quantized subfolder entries
+        for j, quant in enumerate(snap.get("quantized", [])):
+            letter = chr(ord('a') + j)
+            index.append({
+                "id": f"{i}{letter}",
+                "key": f"{snap['name']}/{quant['name']}",
+                "name": f"  └─ {quant['name']}",
+                "path": quant["path"],
+                "size": quant["size"],
+                "is_quantized": True,
+            })
+    return index
+
+
+def list_snapshots(run_info: dict, snapshots: list, marked: set) -> list:
+    """Display snapshots for a run. Returns the index for command processing."""
     print(f"\nSnapshots for '{run_info['name']}' ({run_info['type']}):")
-    print("-" * 50)
+    print("-" * 65)
 
     if not snapshots:
         print("  No snapshots found.")
-        return
+        return []
 
-    for i, snap in enumerate(snapshots, 1):
-        marked_str = "[X]" if snap["name"] in marked else "[ ]"
-        print(f"  {i:<4} {snap['name']:<20} {format_size(snap['size']):<10} {marked_str}")
+    index = build_snapshot_index(snapshots)
 
-    print("-" * 50)
+    for item in index:
+        marked_str = "[X]" if item["key"] in marked else "[ ]"
+        print(f"  {item['id']:<5} {item['name']:<25} {format_size(item['size']):<10} {marked_str}")
+
+    print("-" * 65)
     if marked:
-        marked_size = sum(s["size"] for s in snapshots if s["name"] in marked)
-        print(f"Marked: {len(marked)} snapshots, {format_size(marked_size)}")
+        marked_size = sum(item["size"] for item in index if item["key"] in marked)
+        print(f"Marked: {len(marked)} items, {format_size(marked_size)}")
     print()
+
+    return index
 
 
 def snapshot_session(run_info: dict) -> set:
@@ -189,14 +245,15 @@ def snapshot_session(run_info: dict) -> set:
         return set()
 
     marked = set()
-    snapshot_names = [s["name"] for s in snapshots]
+    index = build_snapshot_index(snapshots)
+    id_to_item = {item["id"]: item for item in index}
 
     print("\nSnapshot commands:")
-    print("  <number>  - Toggle mark for deletion")
+    print("  <id>      - Toggle mark (e.g., 1, 2, 1a, 2b)")
     print("  a         - Mark all")
     print("  n         - Unmark all")
     print("  l         - List snapshots")
-    print("  d         - Done, delete marked snapshots")
+    print("  d         - Done, delete marked items")
     print("  b         - Back (cancel)")
     print()
 
@@ -216,32 +273,30 @@ def snapshot_session(run_info: dict) -> set:
         elif cmd == "l":
             list_snapshots(run_info, snapshots, marked)
         elif cmd == "a":
-            marked = set(snapshot_names)
+            marked = set(item["key"] for item in index)
             list_snapshots(run_info, snapshots, marked)
         elif cmd == "n":
             marked = set()
             list_snapshots(run_info, snapshots, marked)
-        elif cmd.isdigit():
-            idx = int(cmd) - 1
-            if 0 <= idx < len(snapshots):
-                name = snapshots[idx]["name"]
-                if name in marked:
-                    marked.remove(name)
-                    print(f"Unmarked: {name}")
-                else:
-                    marked.add(name)
-                    print(f"Marked: {name}")
+        elif cmd in id_to_item:
+            item = id_to_item[cmd]
+            if item["key"] in marked:
+                marked.remove(item["key"])
+                print(f"Unmarked: {item['key']}")
             else:
-                print(f"Invalid number. Enter 1-{len(snapshots)}")
+                marked.add(item["key"])
+                print(f"Marked: {item['key']}")
         else:
-            print("Unknown command.")
+            valid_ids = ", ".join(sorted(id_to_item.keys(), key=lambda x: (len(x), x)))
+            print(f"Unknown command. Valid IDs: {valid_ids}")
 
     return marked
 
 
 def delete_snapshots(run_info: dict, snapshots: list, to_delete: set) -> None:
-    """Delete marked snapshots."""
+    """Delete marked snapshots and/or quantized subfolders."""
     for snap in snapshots:
+        # Check if full snapshot is marked
         if snap["name"] in to_delete:
             print(f"  Deleting {snap['name']}...", end=" ")
             try:
@@ -249,6 +304,17 @@ def delete_snapshots(run_info: dict, snapshots: list, to_delete: set) -> None:
                 print("done")
             except Exception as e:
                 print(f"error: {e}")
+        else:
+            # Check for quantized subfolders
+            for quant in snap.get("quantized", []):
+                key = f"{snap['name']}/{quant['name']}"
+                if key in to_delete:
+                    print(f"  Deleting {key}...", end=" ")
+                    try:
+                        shutil.rmtree(quant["path"])
+                        print("done")
+                    except Exception as e:
+                        print(f"error: {e}")
 
 
 def interactive_session(runs: dict) -> tuple:
@@ -375,15 +441,16 @@ def main():
     # Show snapshots to delete
     if snapshot_deletions:
         print("\nSNAPSHOTS:")
-        for key, snap_names in snapshot_deletions.items():
+        for key, marked_keys in snapshot_deletions.items():
             info = runs[key]
             snapshots = get_snapshots(info)
-            snap_size = sum(s["size"] for s in snapshots if s["name"] in snap_names)
+            index = build_snapshot_index(snapshots)
+            snap_size = sum(item["size"] for item in index if item["key"] in marked_keys)
             total_size += snap_size
             print(f"  [{info['type']}] {info['name']}:")
-            for snap in snapshots:
-                if snap["name"] in snap_names:
-                    print(f"      {snap['name']} ({format_size(snap['size'])})")
+            for item in index:
+                if item["key"] in marked_keys:
+                    print(f"      {item['key']} ({format_size(item['size'])})")
 
     print("=" * 60)
     count = len(marked) + sum(len(s) for s in snapshot_deletions.values())
