@@ -107,7 +107,7 @@ class GRPOConfig:
 
     # Evaluation & Checkpointing
     eval_steps: int = 50
-    eval_num_batches: int = 16
+    eval_num_prompts: int = 128
     save_steps: int = 500
     output_dir: str = "./checkpoints/grpo"
     resume_from: str = ""
@@ -275,7 +275,7 @@ def evaluate(
     tokenizer,
     dataset,
     config: GRPOConfig,
-    num_batches: int,
+    num_prompts: int,
 ):
     """Evaluate policy on held-out prompts."""
     policy.eval()
@@ -285,6 +285,7 @@ def evaluate(
     total_kl = 0.0
     count = 0
 
+    num_batches = (num_prompts + config.batch_size - 1) // config.batch_size
     for _ in tqdm(range(num_batches), desc="Evaluating"):
         batch = dataset.sample_batch(config.batch_size)
         prompt_ids = batch["input_ids"].to(device)
@@ -610,7 +611,7 @@ def _train_loop(
                         tokenizer,
                         test_dataset,
                         config,
-                        config.eval_num_batches,
+                        config.eval_num_prompts,
                     )
                     print(f"\n[Step {global_step}] Eval - Reward: {eval_reward:.4f}, KL: {eval_kl:.4f}")
                     writer.add_scalar("eval/reward", eval_reward, global_step)
@@ -633,7 +634,7 @@ def _train_loop(
             tokenizer,
             test_dataset,
             config,
-            config.eval_num_batches,
+            config.eval_num_prompts,
         )
         print(f"Epoch {epoch + 1} - Eval Reward: {eval_reward:.4f}, Eval KL: {eval_kl:.4f}")
         examples_seen = global_step * effective_batch_size
