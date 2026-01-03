@@ -22,7 +22,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from transformers import BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
 from models import (
     load_policy_model,
@@ -108,6 +108,7 @@ class GRPOConfig:
     policy_model_name: str = "Qwen/Qwen3-0.6B"
     reward_model_path: str = ""  # Required: path to trained RM checkpoint
     rm_quant_type: str = field(default="", metadata={"help": "RM quantization: '' (none), 'int8', or 'int4'"})
+    ref_quant_type: str = field(default="", metadata={"help": "Ref policy quantization: '' (none), 'int8', or 'int4'"})
 
     # Sequence lengths
     prompt_max_length: int = field(default=1536, metadata={"help": "Max prompt tokens (longer prompts skipped)"})
@@ -801,9 +802,28 @@ def main():
         policy.gradient_checkpointing_enable()
         print("Gradient checkpointing enabled")
 
-    # Load reference policy (frozen copy)
-    print(f"Loading reference policy from {config.policy_model_name}...")
-    ref_policy = load_policy_model(config.policy_model_name, device_map="auto")
+    # Load reference policy (optionally quantized, frozen copy)
+    if config.ref_quant_type:
+        print(f"Loading reference policy from {config.policy_model_name} ({config.ref_quant_type})...")
+        if config.ref_quant_type == "int8":
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+        elif config.ref_quant_type == "int4":
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+        else:
+            raise ValueError(f"Unknown ref_quant_type: {config.ref_quant_type}. Use '', 'int8', or 'int4'.")
+        ref_policy = AutoModelForCausalLM.from_pretrained(
+            config.policy_model_name,
+            quantization_config=quantization_config,
+            device_map="auto",
+        )
+    else:
+        print(f"Loading reference policy from {config.policy_model_name}...")
+        ref_policy = load_policy_model(config.policy_model_name, device_map="auto")
     ref_policy.eval()
     for p in ref_policy.parameters():
         p.requires_grad = False
