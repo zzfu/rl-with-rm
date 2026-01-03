@@ -23,6 +23,7 @@ models.py         # RewardModel and PolicyModel definitions
 data.py           # HH-RLHF dataset loader (preference pairs + prompts)
 train_rm.py       # Reward model training script
 train_grpo.py     # GRPO policy training script
+quantize_rm.py    # RM quantization (INT8/INT4) and evaluation
 chat.py           # Gradio chatbot for testing models
 manage_runs.py    # Interactive tool to list/delete training runs
 utils.py          # CLI utilities
@@ -166,6 +167,35 @@ Metrics logged:
 - `train/kl_div` - KL divergence from reference policy
 - `train/reward_mean` - average reward from RM
 - `eval/reward`, `eval/kl_div` - evaluation metrics
+
+## Quantization
+
+Quantize a trained RM to reduce memory usage and compare accuracy impact:
+
+```bash
+# INT8 quantization (default)
+python quantize_rm.py --checkpoint ./checkpoints/rm/run_name/step-1000
+
+# INT4 quantization (more compression, potentially more accuracy loss)
+python quantize_rm.py --checkpoint ./checkpoints/rm/run_name/step-1000 --quant_type int4
+```
+
+The script:
+1. Loads and evaluates the original bf16 model
+2. Loads and evaluates the quantized model
+3. Saves results to `checkpoint/quantized_{int8|int4}/evaluation_results.json`
+4. Attempts to save the quantized model (works for INT4, may fail for INT8)
+
+### Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--checkpoint` | (required) | Path to trained RM checkpoint |
+| `--quant_type` | int8 | Quantization type: `int8` or `int4` |
+| `--eval_batch_size` | 4 | Evaluation batch size |
+| `--eval_num_batches` | 500 | Number of batches (~2000 examples) |
+| `--max_length` | 2048 | Max sequence length |
+| `--skip_save` | False | Skip saving quantized model |
 
 ## Chat Interface
 

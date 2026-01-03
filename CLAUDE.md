@@ -18,6 +18,7 @@ models.py         # Model definitions (RewardModel, PolicyModel, LoRA loading)
 data.py           # HH-RLHF dataset loader (preference pairs + prompts)
 train_rm.py       # Reward model training script (full-param and LoRA)
 train_grpo.py     # GRPO policy training script
+quantize_rm.py    # RM quantization (INT8/INT4) and evaluation script
 chat.py           # Gradio chatbot UI for testing models
 utils.py          # CLI utilities (auto argparse from dataclass)
 manage_runs.py    # Interactive tool to list/delete training runs
@@ -65,6 +66,12 @@ requirements.txt  # Python dependencies
   - Schema: step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage
   - Async writes via ThreadPoolExecutor (non-blocking)
   - ~10 KB/step, ~450 MB per full epoch
+
+### Quantization
+- Uses bitsandbytes for INT8/INT4 quantization
+- INT4 uses NF4 (Normal Float 4) with double quantization for best quality
+- `quantize_rm.py` compares original vs quantized on full test set
+- Outputs saved to `checkpoint/quantized_{int8|int4}/` subfolder
 
 ### Dataset
 - **Anthropic/hh-rlhf**: Human preference data (chosen/rejected pairs)
