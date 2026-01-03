@@ -145,6 +145,7 @@ python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
 | `--group_size` | 8 | Completions per prompt |
 | `--lr` | 1e-6 | Learning rate |
 | `--grad_accum_steps` | 4 | Gradient accumulation steps |
+| `--max_grad_norm` | 10.0 | Gradient clipping (0 to disable) |
 | `--n_minibatches` | 1 | Gradient steps per batch (PPO-style reuse) |
 | `--kl_coef` | 0.05 | KL penalty coefficient |
 | `--cliprange` | 0.2 | PPO clipping range |
@@ -154,6 +155,7 @@ python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
 | `--eval_num_prompts` | 128 | Prompts per evaluation |
 | `--output_dir` | ./checkpoints/grpo | Output directory |
 | `--log_dir` | ./logs/grpo | TensorBoard log directory |
+| `--save_rollouts` | True | Save all generations to SQLite |
 
 ### LoRA Training
 

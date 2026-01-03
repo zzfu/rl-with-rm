@@ -121,7 +121,7 @@ class GRPOConfig:
     group_size: int = 8  # completions per prompt
     lr: float = 1e-6
     grad_accum_steps: int = 4
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 10.0
     gradient_checkpointing: bool = True
 
     # GRPO hyperparameters
@@ -154,7 +154,7 @@ class GRPOConfig:
     lora_target_modules: str = "q_proj,k_proj,v_proj,o_proj"
 
     # Rollout logging
-    save_rollouts: bool = False
+    save_rollouts: bool = True
     rollouts_dir: str = "./rollouts"
 
     # Debug
