@@ -79,9 +79,25 @@ def get_model_memory_footprint(model) -> dict:
     }
 
 
+def presample_batches(dataset, batch_size: int, num_batches: int) -> list[dict]:
+    """Pre-sample batches for consistent evaluation across models."""
+    print(f"Pre-sampling {num_batches} batches ({num_batches * batch_size} examples)...")
+    batches = []
+    for _ in tqdm(range(num_batches), desc="Sampling"):
+        batch = dataset.sample_batch(batch_size)
+        # Store on CPU
+        batches.append({
+            "chosen_input_ids": batch["chosen_input_ids"],
+            "chosen_attention_mask": batch["chosen_attention_mask"],
+            "rejected_input_ids": batch["rejected_input_ids"],
+            "rejected_attention_mask": batch["rejected_attention_mask"],
+        })
+    return batches
+
+
 @torch.no_grad()
-def evaluate(model, dataset, batch_size: int, num_batches: int, desc: str = "Evaluating"):
-    """Evaluate model on test dataset."""
+def evaluate(model, batches: list[dict], desc: str = "Evaluating"):
+    """Evaluate model on pre-sampled batches."""
     model.eval()
     device = next(model.parameters()).device
 
@@ -90,9 +106,7 @@ def evaluate(model, dataset, batch_size: int, num_batches: int, desc: str = "Eva
     all_chosen_rewards = []
     all_rejected_rewards = []
 
-    for _ in tqdm(range(num_batches), desc=desc):
-        batch = dataset.sample_batch(batch_size)
-
+    for batch in tqdm(batches, desc=desc):
         chosen_ids = batch["chosen_input_ids"].to(device)
         chosen_mask = batch["chosen_attention_mask"].to(device)
         rejected_ids = batch["rejected_input_ids"].to(device)
@@ -110,6 +124,7 @@ def evaluate(model, dataset, batch_size: int, num_batches: int, desc: str = "Eva
         all_rejected_rewards.extend(rejected_rewards.cpu().tolist())
 
     n = len(all_chosen_rewards)
+    num_batches = len(batches)
     return {
         "loss": total_loss / num_batches,
         "accuracy": total_acc / num_batches,
@@ -178,9 +193,12 @@ def main():
     print("\nLoading tokenizer...")
     tokenizer = load_tokenizer(args.checkpoint)
 
-    # Load test dataset
+    # Load test dataset and pre-sample batches
     print("Loading test dataset...")
     test_dataset = HHRLHFDataset(tokenizer, split="test", max_length=args.max_length)
+
+    # Pre-sample batches once for consistent comparison
+    eval_batches = presample_batches(test_dataset, args.eval_batch_size, args.eval_num_batches)
 
     results = {
         "checkpoint": args.checkpoint,
@@ -205,11 +223,7 @@ def main():
     print(f"Size (estimated): {mem_info['size_mb']:.1f} MB")
 
     eval_start = time.time()
-    original_results = evaluate(
-        original_model, test_dataset,
-        args.eval_batch_size, args.eval_num_batches,
-        desc="Eval original"
-    )
+    original_results = evaluate(original_model, eval_batches, desc="Eval original")
     eval_time_original = time.time() - eval_start
 
     original_results["load_time_s"] = load_time_original
@@ -243,11 +257,7 @@ def main():
     print(f"Size (estimated): {quant_mem['size_mb']:.1f} MB")
 
     eval_start = time.time()
-    quant_results = evaluate(
-        quant_model, test_dataset,
-        args.eval_batch_size, args.eval_num_batches,
-        desc=f"Eval {args.quant_type}"
-    )
+    quant_results = evaluate(quant_model, eval_batches, desc=f"Eval {args.quant_type}")
     eval_time_quant = time.time() - eval_start
 
     quant_results["load_time_s"] = load_time_quant
