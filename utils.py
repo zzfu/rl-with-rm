@@ -4,6 +4,7 @@ Utility functions for the rl-with-rm project.
 
 import argparse
 import json
+import os
 from dataclasses import fields, asdict, MISSING
 from typing import get_origin, get_args
 
@@ -96,8 +97,9 @@ def build_config_from_args(dataclass_type, args: argparse.Namespace, reverse_ren
 
     Merges in order (later overrides earlier):
     1. Dataclass defaults
-    2. Config file (if --config provided)
-    3. Explicit CLI args (non-None values)
+    2. Config from resume_from checkpoint (auto-loaded if no --config)
+    3. Config file (if --config provided)
+    4. Explicit CLI args (non-None values)
 
     Args:
         dataclass_type: The dataclass class
@@ -115,13 +117,23 @@ def build_config_from_args(dataclass_type, args: argparse.Namespace, reverse_ren
         elif field.default_factory is not MISSING:
             kwargs[field.name] = field.default_factory()
 
-    # 2. Override with config file if provided
+    # 2. Auto-load config from resume_from checkpoint (if no explicit --config)
+    if not args.config:
+        resume_from = getattr(args, "resume_from", None)
+        if resume_from:
+            auto_config = os.path.join(resume_from, "train_config.json")
+            if os.path.exists(auto_config):
+                print(f"Loading config from checkpoint: {auto_config}")
+                with open(auto_config) as f:
+                    kwargs.update(json.load(f))
+
+    # 3. Override with explicit --config if provided
     if args.config:
         with open(args.config) as f:
             file_config = json.load(f)
         kwargs.update(file_config)
 
-    # 3. Override with explicit CLI args (non-None values)
+    # 4. Override with explicit CLI args (non-None values)
     for cli_name, field_name in reverse_renames.items():
         value = getattr(args, cli_name, None)
         if value is not None:

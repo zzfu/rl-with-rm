@@ -117,8 +117,8 @@ def save_checkpoint(model, tokenizer, optimizer, config, output_dir: str, step: 
         "epoch": epoch,
         "optimizer_state_dict": optimizer.state_dict(),
     }, os.path.join(save_path, "training_state.pt"))
-    # Save config for reproducibility
-    with open(os.path.join(save_path, "config.json"), "w") as f:
+    # Save training config (use different name to not overwrite model's config.json)
+    with open(os.path.join(save_path, "train_config.json"), "w") as f:
         json.dump(asdict(config), f, indent=2)
 
 

@@ -82,16 +82,23 @@ Training automatically saves checkpoints on crash or interrupt (Ctrl+C). To resu
 python train_rm.py --resume_from ./checkpoints/rm/20240115_143022/step-1000
 ```
 
-### Loading Config from File
-
-Load a saved `config.json` as base config, with CLI args overriding specific values:
+Config is auto-loaded from the checkpoint. To extend training with new hyperparameters:
 
 ```bash
-# Load from saved config
-python train_rm.py --config ./checkpoints/rm/run_name/step-500/config.json
+# Resume and train for one more epoch with different batch size
+python train_rm.py --resume_from ./checkpoints/rm/run_name/step-1000 --epochs 2 --batch_size 16
+```
+
+### Loading Config from File
+
+Load a saved `train_config.json` as base config, with CLI args overriding specific values:
+
+```bash
+# Load from saved config (useful when not resuming)
+python train_rm.py --config ./checkpoints/rm/run_name/step-500/train_config.json
 
 # Load and override specific values
-python train_rm.py --config ./checkpoints/rm/step-500/config.json --lr 1e-6 --epochs 2
+python train_rm.py --config ./checkpoints/rm/step-500/train_config.json --lr 1e-6 --epochs 2
 ```
 
 ### TensorBoard

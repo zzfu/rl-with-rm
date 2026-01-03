@@ -42,9 +42,10 @@ requirements.txt  # Python dependencies
 - **RM Loss**: Bradley-Terry pairwise ranking: `-log(sigmoid(r_chosen - r_rejected))`
 - `TrainConfig` dataclass holds all hyperparameters (single source of truth for defaults)
 - CLI auto-generated from dataclass via `utils.add_dataclass_args()`
-- `--config config.json` loads saved config; CLI args override file values
+- `--config train_config.json` loads saved training config; CLI args override file values
+- `--resume_from` auto-loads train_config.json from checkpoint (no need for separate `--config`)
 - Test evaluation samples with replacement (fast, configurable num_batches)
-- Checkpoints save optimizer state + config.json for resuming; auto-save on crash/interrupt
+- Checkpoints save optimizer state + train_config.json for resuming; auto-save on crash/interrupt
 
 ### LoRA Training
 - Uses peft library with `task_type="SEQ_CLS"` (RM) or `task_type="CAUSAL_LM"` (policy)

@@ -369,10 +369,20 @@ class PromptDataset(Dataset):
 
 if __name__ == "__main__":
     # Quick test
+    import argparse
     from models import load_tokenizer
 
-    print("Loading tokenizer...")
-    tokenizer = load_tokenizer()
+    parser = argparse.ArgumentParser(description="Test HH-RLHF dataset loading")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="Qwen/Qwen3-0.6B",
+        help="Model name or path for tokenizer (default: Qwen/Qwen3-0.6B)",
+    )
+    args = parser.parse_args()
+
+    print(f"Loading tokenizer for {args.model}...")
+    tokenizer = load_tokenizer(args.model)
 
     print("\nCreating dataset...")
     dataset = HHRLHFDataset(tokenizer, split="train", max_length=2048)

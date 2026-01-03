@@ -219,7 +219,8 @@ def save_checkpoint(
         os.path.join(save_path, "training_state.pt"),
     )
 
-    with open(os.path.join(save_path, "config.json"), "w") as f:
+    # Save training config (use different name to not overwrite model's config.json)
+    with open(os.path.join(save_path, "train_config.json"), "w") as f:
         json.dump(asdict(config), f, indent=2)
 
 
