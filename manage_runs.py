@@ -13,6 +13,7 @@ from pathlib import Path
 RUN_DIRS = [
     {"type": "RM", "checkpoints": "./checkpoints/rm", "logs": "./logs/rm"},
     {"type": "GRPO", "checkpoints": "./checkpoints/grpo", "logs": "./logs/grpo"},
+    {"type": "QUANT", "checkpoints": "./quantized_models", "logs": None},
 ]
 
 
@@ -46,7 +47,7 @@ def get_runs() -> dict:
     for run_dir_config in RUN_DIRS:
         run_type = run_dir_config["type"]
         checkpoint_path = Path(run_dir_config["checkpoints"])
-        log_path = Path(run_dir_config["logs"])
+        log_path = Path(run_dir_config["logs"]) if run_dir_config["logs"] else None
 
         # Scan checkpoints
         if checkpoint_path.exists():
@@ -65,7 +66,7 @@ def get_runs() -> dict:
                     }
 
         # Scan logs
-        if log_path.exists():
+        if log_path and log_path.exists():
             for run_dir in log_path.iterdir():
                 if run_dir.is_dir():
                     run_name = run_dir.name
