@@ -572,7 +572,6 @@ def _train_loop(
 def main():
     parser = argparse.ArgumentParser(
         description="Train policy with GRPO (Group Relative Policy Optimization)",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     reverse_renames = add_dataclass_args(
         parser,

@@ -304,7 +304,6 @@ def _train_loop(
 def main():
     parser = argparse.ArgumentParser(
         description="Train Reward Model with Bradley-Terry pairwise loss",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     reverse_renames = add_dataclass_args(parser, TrainConfig, renames={
         "model_name": "model",
