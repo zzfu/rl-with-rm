@@ -156,6 +156,16 @@ class GRPOConfig:
     save_rollouts: bool = False
     rollouts_dir: str = "./rollouts"
 
+    # Debug
+    verbose: bool = False  # Print detailed progress logs
+
+
+def vlog(verbose: bool, step: int, msg: str):
+    """Print timestamped message if verbose mode enabled."""
+    if verbose:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [Step {step}] {msg}")
+
 
 def compute_logprobs(
     model,
@@ -519,6 +529,7 @@ def _train_loop(
 
             # Generate completions
             with torch.no_grad():
+                vlog(config.verbose, global_step, "Generating completions...")
                 full_ids, full_mask, prompt_lengths = generate_completions(
                     policy,
                     tokenizer,
@@ -532,6 +543,7 @@ def _train_loop(
                 )
 
                 # Score with reward model (strip think tags to match RM training)
+                vlog(config.verbose, global_step, "Scoring with reward model...")
                 completion_texts = tokenizer.batch_decode(full_ids, skip_special_tokens=False)
                 stripped_texts = [strip_think_tags(t) for t in completion_texts]
                 stripped_tokens = tokenizer(
@@ -552,11 +564,13 @@ def _train_loop(
                 )
 
                 # Get reference log probs
+                vlog(config.verbose, global_step, "Computing ref policy logprobs...")
                 ref_logprobs = compute_logprobs(
                     ref_policy, full_ids, full_mask, prompt_lengths
                 )
 
                 # Get old log probs (for PPO ratio)
+                vlog(config.verbose, global_step, "Computing old policy logprobs...")
                 old_logprobs = compute_logprobs(
                     policy, full_ids, full_mask, prompt_lengths
                 )
@@ -602,6 +616,7 @@ def _train_loop(
             # When accumulation complete, run n_minibatches updates over all stored data
             if (step + 1) % config.grad_accum_steps == 0:
                 for inner_step in range(config.n_minibatches):
+                    vlog(config.verbose, global_step, f"Minibatch {inner_step + 1}/{config.n_minibatches}: forward & backward...")
                     # Accumulate gradients over all stored batches
                     for batch_data in stored_batches:
                         # Move batch data to GPU
@@ -635,6 +650,7 @@ def _train_loop(
                             accum_policy_loss += policy_loss.item()
                             accum_kl += kl_div.item()
 
+                    vlog(config.verbose, global_step, f"Minibatch {inner_step + 1}/{config.n_minibatches}: optimizer step...")
                     # Optimizer step after processing all batches
                     grad_norm = torch.nn.utils.clip_grad_norm_(
                         policy.parameters(),
