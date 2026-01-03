@@ -125,9 +125,9 @@ class GRPOConfig:
     gradient_checkpointing: bool = True
 
     # GRPO hyperparameters
-    kl_coef: float = 0.05  # KL penalty coefficient
+    kl_coef: float = 0.01  # KL penalty coefficient
     cliprange: float = 0.2  # PPO clipping range
-    normalize_advantages: bool = False  # Normalize within group
+    normalize_advantages: bool = True  # Normalize within group
     n_minibatches: int = field(default=1, metadata={"help": "Gradient steps per batch (reusing old_logprobs)"})
 
     # Generation

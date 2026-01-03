@@ -147,7 +147,7 @@ python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
 | `--grad_accum_steps` | 4 | Gradient accumulation steps |
 | `--max_grad_norm` | 10.0 | Gradient clipping (0 to disable) |
 | `--n_minibatches` | 1 | Gradient steps per batch (PPO-style reuse) |
-| `--kl_coef` | 0.05 | KL penalty coefficient |
+| `--kl_coef` | 0.01 | KL penalty coefficient |
 | `--cliprange` | 0.2 | PPO clipping range |
 | `--max_new_tokens` | 512 | Max tokens to generate |
 | `--temperature` | 1.0 | Sampling temperature |
