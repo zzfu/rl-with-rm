@@ -161,11 +161,21 @@ class GRPOConfig:
     verbose: bool = False  # Print detailed progress logs
 
 
-def vlog(verbose: bool, step: int, msg: str):
+def get_vram_usage() -> str:
+    """Get current VRAM usage as string."""
+    if torch.cuda.is_available():
+        used = torch.cuda.memory_allocated() / 1024**3
+        return f"[VRAM: {used:.1f}GB]"
+    return ""
+
+
+def vlog(verbose: bool, step: int, msg: str, accum_step: int = None, accum_total: int = None):
     """Print timestamped message if verbose mode enabled."""
     if verbose:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] [Step {step}] {msg}")
+        accum_str = f" [{accum_step}/{accum_total}]" if accum_step is not None else ""
+        vram = get_vram_usage()
+        print(f"[{timestamp}] [Step {step}]{accum_str} {msg} {vram}")
 
 
 def compute_logprobs(
@@ -521,7 +531,7 @@ def _train_loop(
         # Storage for batch data during gradient accumulation
         stored_batches = []
 
-        pbar = tqdm(range(steps_per_epoch * config.grad_accum_steps), desc="Training")
+        pbar = tqdm(range(steps_per_epoch * config.grad_accum_steps), desc="Training", disable=config.verbose)
         for step in pbar:
             # Sample prompts
             batch = train_dataset.sample_batch(config.batch_size)
@@ -529,8 +539,9 @@ def _train_loop(
             prompt_mask = batch["attention_mask"].to(device)
 
             # Generate completions
+            accum_step = step % config.grad_accum_steps + 1
             with torch.no_grad():
-                vlog(config.verbose, global_step, "Generating completions...")
+                vlog(config.verbose, global_step, "Generating completions...", accum_step, config.grad_accum_steps)
                 full_ids, full_mask, prompt_lengths = generate_completions(
                     policy,
                     tokenizer,
@@ -544,7 +555,7 @@ def _train_loop(
                 )
 
                 # Score with reward model (strip think tags to match RM training)
-                vlog(config.verbose, global_step, "Scoring with reward model...")
+                vlog(config.verbose, global_step, "Scoring with reward model...", accum_step, config.grad_accum_steps)
                 completion_texts = tokenizer.batch_decode(full_ids, skip_special_tokens=False)
                 stripped_texts = [strip_think_tags(t) for t in completion_texts]
                 stripped_tokens = tokenizer(
@@ -565,13 +576,13 @@ def _train_loop(
                 )
 
                 # Get reference log probs
-                vlog(config.verbose, global_step, "Computing ref policy logprobs...")
+                vlog(config.verbose, global_step, "Computing ref policy logprobs...", accum_step, config.grad_accum_steps)
                 ref_logprobs = compute_logprobs(
                     ref_policy, full_ids, full_mask, prompt_lengths
                 )
 
                 # Get old log probs (for PPO ratio)
-                vlog(config.verbose, global_step, "Computing old policy logprobs...")
+                vlog(config.verbose, global_step, "Computing old policy logprobs...", accum_step, config.grad_accum_steps)
                 old_logprobs = compute_logprobs(
                     policy, full_ids, full_mask, prompt_lengths
                 )
