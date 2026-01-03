@@ -810,7 +810,7 @@ def main():
         print(f"Policy parameters: {sum(p.numel() for p in policy.parameters()):,}")
 
     if config.gradient_checkpointing:
-        policy.gradient_checkpointing_enable()
+        policy.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         print("Gradient checkpointing enabled")
 
     # Load reference policy (optionally quantized, frozen copy)
