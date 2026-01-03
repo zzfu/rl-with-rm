@@ -119,8 +119,9 @@ def get_snapshots(run_info: dict) -> list:
     return snapshots
 
 
-def list_runs(runs: dict, marked: set) -> list:
+def list_runs(runs: dict, marked: set, snapshot_deletions: dict = None) -> list:
     """Display all runs with their info. Returns sorted keys."""
+    snapshot_deletions = snapshot_deletions or {}
     if not runs:
         print("No runs found.")
         return []
@@ -136,7 +137,13 @@ def list_runs(runs: dict, marked: set) -> list:
     for i, (key, info) in enumerate(sorted_items, 1):
         ckpt = "Y" if info["checkpoints"] else "-"
         logs = "Y" if info["logs"] else "-"
-        marked_str = "[X]" if key in marked else "[ ]"
+        # [X] = full run, [~] = some snapshots, [ ] = nothing
+        if key in marked:
+            marked_str = "[X]"
+        elif key in snapshot_deletions:
+            marked_str = "[~]"
+        else:
+            marked_str = "[ ]"
         size_str = format_size(info["total_size"])
 
         # Truncate run name if too long
@@ -259,7 +266,7 @@ def interactive_session(runs: dict) -> tuple:
     print("  q          - Quit without deleting")
     print()
 
-    sorted_keys = list_runs(runs, marked)
+    sorted_keys = list_runs(runs, marked, snapshot_deletions)
 
     while True:
         try:
@@ -274,13 +281,13 @@ def interactive_session(runs: dict) -> tuple:
         elif cmd == "d":
             break
         elif cmd == "l":
-            sorted_keys = list_runs(runs, marked)
+            sorted_keys = list_runs(runs, marked, snapshot_deletions)
         elif cmd == "a":
             marked = set(runs.keys())
-            list_runs(runs, marked)
+            list_runs(runs, marked, snapshot_deletions)
         elif cmd == "n":
             marked = set()
-            list_runs(runs, marked)
+            list_runs(runs, marked, snapshot_deletions)
         elif cmd.startswith("s") and cmd[1:].isdigit():
             idx = int(cmd[1:]) - 1
             if 0 <= idx < len(sorted_keys):
@@ -293,6 +300,7 @@ def interactive_session(runs: dict) -> tuple:
                 if snapshots_to_delete:
                     snapshot_deletions[key] = snapshots_to_delete
                     print(f"Queued {len(snapshots_to_delete)} snapshots for deletion")
+                    list_runs(runs, marked, snapshot_deletions)
             else:
                 print(f"Invalid number. Enter s1-s{len(runs)}")
         elif cmd.isdigit():
