@@ -61,6 +61,7 @@ requirements.txt  # Python dependencies
 - **Loss**: PPO with clipped objective + KL penalty from frozen reference policy
 - **Key hyperparams**: `group_size=8`, `kl_coef=0.05`, `cliprange=0.2`
 - Three models in memory: policy (trainable), ref_policy (frozen), reward_model (frozen)
+  - `--rm_quant_type` and `--ref_quant_type` enable INT8/INT4 quantization for frozen models (saves VRAM)
 - `PromptDataset` extracts prompts from HH-RLHF with left-padding for generation
   - Uses mixed train/test splits (default: 1.5k train + 8.5k test = 10k) to reduce RM overfitting
 - **n_minibatches**: Multiple gradient steps per batch for PPO-style sample efficiency

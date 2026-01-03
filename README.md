@@ -138,6 +138,8 @@ python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
 |----------|---------|-------------|
 | `--model` | Qwen/Qwen3-0.6B | Policy base model |
 | `--reward_model_path` | (required) | Path to trained RM checkpoint |
+| `--rm_quant_type` | (none) | RM quantization: `int8` or `int4` |
+| `--ref_quant_type` | (none) | Ref policy quantization: `int8` or `int4` |
 | `--epochs` | 1 | Number of epochs |
 | `--batch_size` | 2 | Prompts per batch |
 | `--group_size` | 8 | Completions per prompt |
