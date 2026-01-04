@@ -137,9 +137,9 @@ class GRPOConfig:
     do_sample: bool = True
 
     # Evaluation & Checkpointing
-    eval_steps: int = field(default=50, metadata={"help": "Evaluate every N steps (-1 to disable)"})
-    eval_num_prompts: int = 128
-    save_steps: int = 500
+    eval_steps: int = field(default=5, metadata={"help": "Evaluate every N steps (-1 to disable)"})
+    eval_num_prompts: int = 64
+    save_steps: int = 15
     output_dir: str = "./checkpoints/grpo"
     resume_from: str = ""
 
@@ -577,14 +577,14 @@ def _train_loop(
 
                 # Compute completion lengths and check for proper endings
                 eos_token_id = tokenizer.eos_token_id  # <|im_end|>
+                original_prompt_len = prompt_ids.shape[1]  # Padded prompt length
                 completion_lengths = []
                 proper_endings = []
                 for i in range(full_ids.shape[0]):
-                    prompt_len = prompt_lengths[i].item()
                     seq = full_ids[i]
-                    # Completion tokens are after prompt, excluding padding
-                    comp_tokens = seq[prompt_len:]
-                    # Count non-pad tokens
+                    # Completion tokens start after the original padded prompt
+                    comp_tokens = seq[original_prompt_len:]
+                    # Count non-pad tokens (may have right-padding if ended early)
                     non_pad = (comp_tokens != tokenizer.pad_token_id).sum().item()
                     completion_lengths.append(non_pad)
                     # Check if last non-pad token is EOS
