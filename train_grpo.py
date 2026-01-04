@@ -129,6 +129,7 @@ class GRPOConfig:
     cliprange: float = 0.2  # PPO clipping range
     normalize_advantages: bool = True  # Normalize within group
     n_minibatches: int = field(default=1, metadata={"help": "Gradient steps per batch (reusing old_logprobs)"})
+    eos_penalty: float = field(default=1.0, metadata={"help": "Reward penalty for completions not ending with EOS"})
 
     # Generation
     temperature: float = 1.0
@@ -528,6 +529,8 @@ def _train_loop(
         accum_policy_loss = 0.0
         accum_kl = 0.0
         accum_reward = 0.0
+        accum_completion_lengths = []
+        accum_proper_endings = []
 
         # Storage for batch data during gradient accumulation
         stored_batches = []
@@ -571,6 +574,37 @@ def _train_loop(
                     input_ids=stripped_tokens["input_ids"],
                     attention_mask=stripped_tokens["attention_mask"],
                 )
+
+                # Compute completion lengths and check for proper endings
+                eos_token_id = tokenizer.eos_token_id  # <|im_end|>
+                completion_lengths = []
+                proper_endings = []
+                for i in range(full_ids.shape[0]):
+                    prompt_len = prompt_lengths[i].item()
+                    seq = full_ids[i]
+                    # Completion tokens are after prompt, excluding padding
+                    comp_tokens = seq[prompt_len:]
+                    # Count non-pad tokens
+                    non_pad = (comp_tokens != tokenizer.pad_token_id).sum().item()
+                    completion_lengths.append(non_pad)
+                    # Check if last non-pad token is EOS
+                    if non_pad > 0:
+                        last_token = comp_tokens[non_pad - 1].item()
+                        proper_endings.append(last_token == eos_token_id)
+                    else:
+                        proper_endings.append(False)
+
+                # Apply penalty for non-proper endings
+                if config.eos_penalty > 0:
+                    penalties = torch.tensor(
+                        [0.0 if ended else -config.eos_penalty for ended in proper_endings],
+                        device=rewards.device
+                    )
+                    rewards = rewards + penalties
+
+                # Accumulate completion stats for logging
+                accum_completion_lengths.extend(completion_lengths)
+                accum_proper_endings.extend(proper_endings)
 
                 # Compute advantages
                 advantages = compute_group_advantages(
@@ -716,6 +750,15 @@ def _train_loop(
                 writer.add_scalar("train/loss_by_examples", avg_loss, examples_seen)
                 writer.add_scalar("train/reward_by_examples", avg_reward, examples_seen)
 
+                # Log completion stats
+                if accum_completion_lengths:
+                    avg_comp_len = sum(accum_completion_lengths) / len(accum_completion_lengths)
+                    max_comp_len = max(accum_completion_lengths)
+                    proper_end_rate = sum(accum_proper_endings) / len(accum_proper_endings)
+                    writer.add_scalar("train/completion_length_avg", avg_comp_len, global_step)
+                    writer.add_scalar("train/completion_length_max", max_comp_len, global_step)
+                    writer.add_scalar("train/proper_ending_rate", proper_end_rate, global_step)
+
                 pbar.set_postfix({
                     "loss": f"{avg_loss:.4f}",
                     "reward": f"{avg_reward:.4f}",
@@ -727,6 +770,8 @@ def _train_loop(
                 accum_policy_loss = 0.0
                 accum_kl = 0.0
                 accum_reward = 0.0
+                accum_completion_lengths = []
+                accum_proper_endings = []
 
                 # Evaluate
                 if config.eval_steps > 0 and global_step % config.eval_steps == 0:

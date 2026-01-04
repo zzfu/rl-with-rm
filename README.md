@@ -149,6 +149,7 @@ python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
 | `--n_minibatches` | 1 | Gradient steps per batch (PPO-style reuse) |
 | `--kl_coef` | 0.01 | KL penalty coefficient |
 | `--cliprange` | 0.2 | PPO clipping range |
+| `--eos_penalty` | 1.0 | Reward penalty for incomplete responses |
 | `--max_new_tokens` | 512 | Max tokens to generate |
 | `--temperature` | 1.0 | Sampling temperature |
 | `--eval_steps` | 50 | Evaluate every N steps (-1 to disable) |
@@ -175,6 +176,8 @@ Metrics logged:
 - `train/loss`, `train/policy_loss` - training losses
 - `train/kl_div` - KL divergence from reference policy
 - `train/reward_mean` - average reward from RM
+- `train/completion_length_avg`, `train/completion_length_max` - token counts
+- `train/proper_ending_rate` - fraction of completions ending with EOS
 - `eval/reward`, `eval/kl_div` - evaluation metrics
 
 ## Quantization
