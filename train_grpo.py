@@ -193,7 +193,7 @@ def compute_logprobs(
         model: Policy model
         input_ids: Full sequences (prompt + completion) [batch_size, seq_len]
         attention_mask: Attention mask [batch_size, seq_len]
-        prompt_lengths: Length of each prompt [batch_size]
+        prompt_lengths: Padded prompt length (index of first completion token) [batch_size]
 
     Returns:
         token_log_probs: Per-token log probs [batch_size, seq_len-1]
@@ -217,6 +217,113 @@ def compute_logprobs(
     completion_mask = completion_mask * attention_mask[:, 1:]
 
     return token_log_probs, completion_mask
+
+
+def compute_kl_divergence(
+    policy_logprobs: torch.Tensor,
+    ref_logprobs: torch.Tensor,
+    completion_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Compute KL divergence using GRPO estimator (always >= 0, lower variance).
+
+    Args:
+        policy_logprobs: Policy log probs [batch_size, seq_len]
+        ref_logprobs: Reference policy log probs [batch_size, seq_len]
+        completion_mask: Mask for completion tokens [batch_size, seq_len]
+
+    Returns:
+        Scalar KL divergence (masked mean over completion tokens)
+    """
+    log_ratio = ref_logprobs - policy_logprobs  # log(π_ref/π_policy)
+    per_token_kl = torch.exp(log_ratio) - log_ratio - 1
+    return (per_token_kl * completion_mask).sum() / completion_mask.sum()
+
+
+def compute_rewards(
+    reward_model,
+    full_ids: torch.Tensor,
+    prompt_len: int,
+    tokenizer,
+    config,
+    device: torch.device,
+) -> tuple[torch.Tensor, list[str], list[int], list[bool]]:
+    """
+    Compute rewards with EOS penalty.
+
+    Args:
+        reward_model: Reward model
+        full_ids: Full sequences (prompt + completion) [batch_size, seq_len]
+        prompt_len: Padded prompt length (same for all sequences in batch)
+        tokenizer: Tokenizer
+        config: Training config (for max_length and eos_penalty)
+        device: Device
+
+    Returns:
+        rewards: Reward tensor [batch_size]
+        completion_texts: Decoded completion-only texts (no prompt, no padding)
+        completion_lengths: List of completion lengths
+        proper_endings: List of bools indicating if completion ended with EOS
+    """
+    eos_token_id = tokenizer.eos_token_id
+    pad_token_id = tokenizer.pad_token_id
+
+    # Process each sequence: extract non-pad tokens, compute stats
+    full_texts = []
+    completion_texts = []
+    completion_lengths = []
+    proper_endings = []
+
+    for i in range(full_ids.shape[0]):
+        seq = full_ids[i]
+
+        # Find non-pad tokens (handles both left and right padding)
+        non_pad_mask = seq != pad_token_id
+        non_pad_tokens = seq[non_pad_mask]
+
+        # Decode full transcript (prompt + completion, no padding)
+        full_text = tokenizer.decode(non_pad_tokens, skip_special_tokens=False)
+        full_texts.append(full_text)
+
+        # Completion tokens start after the padded prompt
+        comp_tokens = seq[prompt_len:]
+        non_pad_comp = (comp_tokens != pad_token_id).sum().item()
+        completion_lengths.append(non_pad_comp)
+
+        # Check if last non-pad token is EOS
+        if non_pad_comp > 0:
+            last_token = comp_tokens[non_pad_comp - 1].item()
+            proper_endings.append(last_token == eos_token_id)
+            # Decode only the non-pad completion tokens
+            comp_text = tokenizer.decode(comp_tokens[:non_pad_comp], skip_special_tokens=False)
+        else:
+            proper_endings.append(False)
+            comp_text = ""
+        completion_texts.append(comp_text)
+
+    # Score with reward model (strip think tags to match RM training)
+    stripped_texts = [strip_think_tags(t) for t in full_texts]
+    stripped_tokens = tokenizer(
+        stripped_texts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=config.max_length,
+    ).to(device)
+    rewards = reward_model(
+        input_ids=stripped_tokens["input_ids"],
+        attention_mask=stripped_tokens["attention_mask"],
+    )
+
+    # Apply penalty for non-proper endings
+    if config.eos_penalty > 0:
+        penalties = torch.tensor(
+            [0.0 if ended else -config.eos_penalty for ended in proper_endings],
+            device=rewards.device
+        )
+        rewards = rewards + penalties
+
+    return rewards, completion_texts, completion_lengths, proper_endings
 
 
 def compute_group_advantages(
@@ -264,7 +371,7 @@ def generate_completions(
     Returns:
         full_ids: [batch * group_size, seq_len] - prompt + completion
         full_mask: [batch * group_size, seq_len]
-        prompt_lengths: [batch * group_size] - length of prompt for each
+        prompt_lengths: [batch * group_size] - padded prompt length (index of first completion token)
     """
     batch_size = prompt_ids.shape[0]
     device = prompt_ids.device
@@ -273,8 +380,11 @@ def generate_completions(
     expanded_ids = prompt_ids.repeat_interleave(group_size, dim=0)
     expanded_mask = prompt_mask.repeat_interleave(group_size, dim=0)
 
-    # Store original prompt lengths (accounting for left padding)
-    prompt_lengths = prompt_mask.sum(dim=1).repeat_interleave(group_size)
+    # Padded prompt length = index of first completion token (same for all in batch)
+    padded_prompt_len = prompt_ids.shape[1]
+    prompt_lengths = torch.full(
+        (batch_size * group_size,), padded_prompt_len, device=device, dtype=torch.long
+    )
 
     # Generate
     outputs = model.generate(
@@ -361,25 +471,15 @@ def evaluate(
             do_sample=config.do_sample,
         )
 
-        # Score with reward model (strip think tags to match RM training)
-        completion_texts = tokenizer.batch_decode(full_ids, skip_special_tokens=False)
-        stripped_texts = [strip_think_tags(t) for t in completion_texts]
-        stripped_tokens = tokenizer(
-            stripped_texts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=config.max_length,
-        ).to(device)
-        rewards = reward_model(
-            input_ids=stripped_tokens["input_ids"],
-            attention_mask=stripped_tokens["attention_mask"],
+        # Score with reward model (includes EOS penalty)
+        rewards, completion_texts, _, _ = compute_rewards(
+            reward_model, full_ids, prompt_lengths[0].item(), tokenizer, config, device
         )
 
         # Compute KL
-        policy_logprobs = compute_logprobs(policy, full_ids, full_mask, prompt_lengths)
-        ref_logprobs = compute_logprobs(ref_policy, full_ids, full_mask, prompt_lengths)
-        kl = (policy_logprobs - ref_logprobs).mean()
+        policy_logprobs, completion_mask = compute_logprobs(policy, full_ids, full_mask, prompt_lengths)
+        ref_logprobs, _ = compute_logprobs(ref_policy, full_ids, full_mask, prompt_lengths)
+        kl = compute_kl_divergence(policy_logprobs, ref_logprobs, completion_mask)
 
         total_reward += rewards.mean().item()
         total_kl += kl.item()
@@ -387,7 +487,11 @@ def evaluate(
 
         # Save eval rollouts asynchronously
         if rollout_executor is not None:
-            prompt_texts = tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
+            # Decode prompts without left-padding
+            prompt_texts = []
+            for j in range(prompt_ids.shape[0]):
+                non_pad = prompt_ids[j][prompt_ids[j] != tokenizer.pad_token_id]
+                prompt_texts.append(tokenizer.decode(non_pad, skip_special_tokens=False))
             rewards_list = rewards.tolist()
             rows = []
             for i, (prompt_text, comp_text, reward) in enumerate(
@@ -559,48 +663,11 @@ def _train_loop(
                     do_sample=config.do_sample,
                 )
 
-                # Score with reward model (strip think tags to match RM training)
+                # Score with reward model (includes EOS penalty)
                 vlog(config.verbose, global_step, "Scoring with reward model...", accum_step, config.grad_accum_steps)
-                completion_texts = tokenizer.batch_decode(full_ids, skip_special_tokens=False)
-                stripped_texts = [strip_think_tags(t) for t in completion_texts]
-                stripped_tokens = tokenizer(
-                    stripped_texts,
-                    return_tensors="pt",
-                    padding=True,
-                    truncation=True,
-                    max_length=config.max_length,
-                ).to(device)
-                rewards = reward_model(
-                    input_ids=stripped_tokens["input_ids"],
-                    attention_mask=stripped_tokens["attention_mask"],
+                rewards, completion_texts, completion_lengths, proper_endings = compute_rewards(
+                    reward_model, full_ids, prompt_lengths[0].item(), tokenizer, config, device
                 )
-
-                # Compute completion lengths and check for proper endings
-                eos_token_id = tokenizer.eos_token_id  # <|im_end|>
-                original_prompt_len = prompt_ids.shape[1]  # Padded prompt length
-                completion_lengths = []
-                proper_endings = []
-                for i in range(full_ids.shape[0]):
-                    seq = full_ids[i]
-                    # Completion tokens start after the original padded prompt
-                    comp_tokens = seq[original_prompt_len:]
-                    # Count non-pad tokens (may have right-padding if ended early)
-                    non_pad = (comp_tokens != tokenizer.pad_token_id).sum().item()
-                    completion_lengths.append(non_pad)
-                    # Check if last non-pad token is EOS
-                    if non_pad > 0:
-                        last_token = comp_tokens[non_pad - 1].item()
-                        proper_endings.append(last_token == eos_token_id)
-                    else:
-                        proper_endings.append(False)
-
-                # Apply penalty for non-proper endings
-                if config.eos_penalty > 0:
-                    penalties = torch.tensor(
-                        [0.0 if ended else -config.eos_penalty for ended in proper_endings],
-                        device=rewards.device
-                    )
-                    rewards = rewards + penalties
 
                 # Accumulate completion stats for logging
                 accum_completion_lengths.extend(completion_lengths)
@@ -628,9 +695,11 @@ def _train_loop(
 
             # Save rollouts asynchronously (once per batch)
             if rollout_executor is not None:
-                prompt_texts = tokenizer.batch_decode(
-                    prompt_ids, skip_special_tokens=True
-                )
+                # Decode prompts without left-padding
+                prompt_texts = []
+                for j in range(prompt_ids.shape[0]):
+                    non_pad = prompt_ids[j][prompt_ids[j] != tokenizer.pad_token_id]
+                    prompt_texts.append(tokenizer.decode(non_pad, skip_special_tokens=False))
                 rows = []
                 rewards_list = rewards.tolist()
                 advantages_list = advantages.tolist()
@@ -699,9 +768,7 @@ def _train_loop(
                         policy_loss = (per_token_loss * b_completion_mask).sum() / b_completion_mask.sum()
 
                         # Per-token KL penalty (GRPO estimator: always ≥ 0, lower variance)
-                        log_ratio = b_ref_logprobs - policy_logprobs  # log(π_ref/π_policy)
-                        per_token_kl = torch.exp(log_ratio) - log_ratio - 1
-                        kl_div = (per_token_kl * b_completion_mask).sum() / b_completion_mask.sum()
+                        kl_div = compute_kl_divergence(policy_logprobs, b_ref_logprobs, b_completion_mask)
 
                         # Total loss (divided by grad_accum_steps for proper averaging)
                         loss = policy_loss + config.kl_coef * kl_div
