@@ -150,10 +150,11 @@ python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
 | `--kl_coef` | 0.01 | KL penalty coefficient |
 | `--cliprange` | 0.2 | PPO clipping range |
 | `--eos_penalty` | 1.0 | Reward penalty for incomplete responses |
-| `--max_new_tokens` | 512 | Max tokens to generate |
+| `--max_new_tokens` | 2048 | Max tokens to generate |
 | `--temperature` | 1.0 | Sampling temperature |
-| `--eval_steps` | 50 | Evaluate every N steps (-1 to disable) |
-| `--eval_num_prompts` | 128 | Prompts per evaluation |
+| `--eval_steps` | 5 | Evaluate every N steps (-1 to disable) |
+| `--eval_num_prompts` | 64 | Prompts per evaluation |
+| `--save_steps` | 15 | Save checkpoint every N steps |
 | `--output_dir` | ./checkpoints/grpo | Output directory |
 | `--log_dir` | ./logs/grpo | TensorBoard log directory |
 | `--save_rollouts` | True | Save all generations to SQLite |

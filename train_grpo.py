@@ -112,7 +112,7 @@ class GRPOConfig:
 
     # Sequence lengths
     prompt_max_length: int = field(default=1536, metadata={"help": "Max prompt tokens (longer prompts skipped)"})
-    max_new_tokens: int = field(default=512, metadata={"help": "Max tokens to generate per completion"})
+    max_new_tokens: int = field(default=2048, metadata={"help": "Max tokens to generate per completion"})
     max_length: int = field(default=2048, metadata={"help": "Truncation limit when tokenizing for RM scoring"})
 
     # Training
