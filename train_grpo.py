@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -34,9 +35,12 @@ from data import PromptDataset
 from utils import add_dataclass_args, build_config_from_args, print_config
 
 
+_THINK_TAG_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
 def strip_think_tags(text: str) -> str:
     """Strip thinking tags for RM scoring (matches data.py behavior)."""
-    return re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+    return _THINK_TAG_RE.sub("", text)
 
 
 def init_rollouts_db(db_path: str) -> None:
@@ -74,30 +78,44 @@ def init_rollouts_db(db_path: str) -> None:
     conn.close()
 
 
-def save_rollouts_batch(db_path: str, rows: list) -> None:
-    """Save a batch of rollouts to the database (called async from thread pool)."""
-    conn = sqlite3.connect(db_path)
-    conn.executemany(
-        """INSERT INTO rollouts
-           (step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        rows,
-    )
-    conn.commit()
-    conn.close()
+class RolloutWriter:
+    """Manages persistent SQLite connection for async rollout writes."""
 
+    _local = threading.local()
 
-def save_eval_rollouts_batch(db_path: str, rows: list) -> None:
-    """Save eval rollouts to database (called async from thread pool)."""
-    conn = sqlite3.connect(db_path)
-    conn.executemany(
-        """INSERT INTO eval_rollouts
-           (step, epoch, prompt_index, prompt, completion, reward)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        rows,
-    )
-    conn.commit()
-    conn.close()
+    @classmethod
+    def _get_connection(cls, db_path: str) -> sqlite3.Connection:
+        """Get or create a thread-local connection."""
+        if not hasattr(cls._local, "conn") or cls._local.db_path != db_path:
+            if hasattr(cls._local, "conn"):
+                cls._local.conn.close()
+            cls._local.conn = sqlite3.connect(db_path)
+            cls._local.db_path = db_path
+        return cls._local.conn
+
+    @classmethod
+    def save_rollouts_batch(cls, db_path: str, rows: list) -> None:
+        """Save a batch of rollouts to the database (called async from thread pool)."""
+        conn = cls._get_connection(db_path)
+        conn.executemany(
+            """INSERT INTO rollouts
+               (step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.commit()
+
+    @classmethod
+    def save_eval_rollouts_batch(cls, db_path: str, rows: list) -> None:
+        """Save eval rollouts to database (called async from thread pool)."""
+        conn = cls._get_connection(db_path)
+        conn.executemany(
+            """INSERT INTO eval_rollouts
+               (step, epoch, prompt_index, prompt, completion, reward)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.commit()
 
 
 @dataclass
@@ -429,7 +447,7 @@ def save_checkpoint(
         json.dump(asdict(config), f, indent=2)
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def evaluate(
     policy,
     ref_policy,
@@ -505,7 +523,7 @@ def evaluate(
                     comp_text,
                     reward,
                 ))
-            rollout_executor.submit(save_eval_rollouts_batch, rollout_db_path, rows)
+            rollout_executor.submit(RolloutWriter.save_eval_rollouts_batch, rollout_db_path, rows)
             prompt_index += len(prompt_texts)
 
     return total_reward / count, total_kl / count
@@ -655,7 +673,7 @@ def _train_loop(
             # Generate completions (eval mode to enable KV cache with gradient checkpointing)
             accum_step = step % config.grad_accum_steps + 1
             policy.eval()
-            with torch.no_grad():
+            with torch.inference_mode():
                 vlog(config.verbose, global_step, "Generating completions...", accum_step, config.grad_accum_steps)
                 full_ids, full_mask, prompt_lengths = generate_completions(
                     policy,
@@ -724,7 +742,7 @@ def _train_loop(
                         reward,
                         advantage,
                     ))
-                rollout_executor.submit(save_rollouts_batch, rollout_db_path, rows)
+                rollout_executor.submit(RolloutWriter.save_rollouts_batch, rollout_db_path, rows)
                 accum_prompt_offset += config.batch_size
 
             # Store batch data on CPU for later gradient computation
