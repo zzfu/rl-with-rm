@@ -135,10 +135,10 @@ class GRPOConfig:
 
     # Training
     epochs: int = 1
-    batch_size: int = 4  # prompts per batch
+    batch_size: int = 2  # prompts per batch
     group_size: int = 8  # completions per prompt
     lr: float = 1e-6
-    grad_accum_steps: int = 2
+    grad_accum_steps: int = 4
     max_grad_norm: float = 10.0
     gradient_checkpointing: bool = True
 
@@ -222,12 +222,16 @@ def compute_logprobs(
     logits = outputs.logits[:, :-1, :]  # [batch, seq_len-1, vocab]
     labels = input_ids[:, 1:]  # [batch, seq_len-1]
 
-    # Compute per-token log probs
-    log_probs = F.log_softmax(logits, dim=-1)
-    token_log_probs = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+    # Compute per-token log probs using fused cross_entropy (memory efficient)
+    # Avoids materializing full [batch, seq, vocab] log_softmax tensor
+    batch_size, seq_len, vocab_size = logits.shape
+    token_log_probs = -F.cross_entropy(
+        logits.reshape(-1, vocab_size),
+        labels.reshape(-1),
+        reduction="none",
+    ).reshape(batch_size, seq_len)
 
     # Create mask for completion tokens only
-    batch_size, seq_len = token_log_probs.shape
     positions = torch.arange(seq_len, device=token_log_probs.device).unsqueeze(0)
     # Mask: 1 for completion tokens, 0 for prompt tokens
     # prompt_lengths is the index of first completion token

@@ -153,7 +153,7 @@ python train_grpo.py --reward_model_path ./checkpoints/rm/run_name/step-500
 | `--max_new_tokens` | 2048 | Max tokens to generate |
 | `--temperature` | 1.0 | Sampling temperature |
 | `--eval_steps` | 15 | Evaluate every N steps (-1 to disable) |
-| `--eval_batch_size` | 32 | Eval batch size (default: batch_size * group_size) |
+| `--eval_batch_size` | 16 | Eval batch size (default: batch_size * group_size) |
 | `--eval_num_prompts` | 64 | Prompts per evaluation |
 | `--save_steps` | 15 | Save checkpoint every N steps |
 | `--output_dir` | ./checkpoints/grpo | Output directory |
