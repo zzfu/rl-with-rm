@@ -527,6 +527,9 @@ def evaluate(
             rollout_executor.submit(RolloutWriter.save_eval_rollouts_batch, rollout_db_path, rows)
             prompt_index += len(prompt_texts)
 
+        # Free GPU memory between batches
+        torch.cuda.empty_cache()
+
     return total_reward / count, total_kl / count
 
 
