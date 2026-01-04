@@ -562,7 +562,10 @@ def train(
     print(f"\n  Effective batch size: {effective_batch_size} completions")
     print(f"  Output dir: {output_dir}")
     print(f"  Log dir: {log_dir}")
-    print(f"\nTo monitor training, run: tensorboard --logdir {log_dir}")
+    # Use forward slashes for display (works on all platforms)
+    print(f"\nTo monitor training, run: tensorboard --logdir {log_dir.replace(os.sep, '/')}")
+    if config.save_rollouts:
+        print(f"To view rollouts, run: python view_rollouts.py {rollout_db_path.replace(os.sep, '/')}")
     print()
 
     try:
