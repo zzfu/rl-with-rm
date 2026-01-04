@@ -135,10 +135,10 @@ class GRPOConfig:
 
     # Training
     epochs: int = 1
-    batch_size: int = 2  # prompts per batch
+    batch_size: int = 4  # prompts per batch
     group_size: int = 8  # completions per prompt
     lr: float = 1e-6
-    grad_accum_steps: int = 4
+    grad_accum_steps: int = 2
     max_grad_norm: float = 10.0
     gradient_checkpointing: bool = True
 
@@ -155,7 +155,8 @@ class GRPOConfig:
     do_sample: bool = True
 
     # Evaluation & Checkpointing
-    eval_steps: int = field(default=5, metadata={"help": "Evaluate every N steps (-1 to disable)"})
+    eval_steps: int = field(default=15, metadata={"help": "Evaluate every N steps (-1 to disable)"})
+    eval_batch_size: int = field(default=0, metadata={"help": "Eval batch size (0 = batch_size * group_size)"})
     eval_num_prompts: int = 64
     save_steps: int = 15
     output_dir: str = "./checkpoints/grpo"
@@ -470,9 +471,9 @@ def evaluate(
     count = 0
     prompt_index = 0
 
-    num_batches = (num_prompts + config.batch_size - 1) // config.batch_size
+    num_batches = (num_prompts + config.eval_batch_size - 1) // config.eval_batch_size
     for _ in tqdm(range(num_batches), desc="Evaluating"):
-        batch = dataset.sample_batch(config.batch_size)
+        batch = dataset.sample_batch(config.eval_batch_size)
         prompt_ids = batch["input_ids"].to(device)
         prompt_mask = batch["attention_mask"].to(device)
 
@@ -939,6 +940,10 @@ def main():
     # Validate required args
     if not config.reward_model_path:
         parser.error("--reward_model_path is required")
+
+    # Resolve dynamic defaults
+    if config.eval_batch_size == 0:
+        config.eval_batch_size = config.batch_size * config.group_size
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
