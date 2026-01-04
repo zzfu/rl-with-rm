@@ -190,6 +190,72 @@ def format_completion_display(row: pd.Series, show_full: bool = False) -> str:
     return f"**Reward: {reward:.4f}**{adv_str}\n\n{completion}"
 
 
+def render_prompt_html(prompt_text: str) -> str:
+    """Render a chat prompt as nicely formatted HTML with role labels."""
+    import html
+    import re
+
+    if not prompt_text:
+        return "<p style='color: #888;'>No prompt loaded.</p>"
+
+    # Parse Qwen chat template format: <|im_start|>role\ncontent<|im_end|>
+    pattern = r"<\|im_start\|>(\w+)\n(.*?)<\|im_end\|>"
+    matches = re.findall(pattern, prompt_text, re.DOTALL)
+
+    if not matches:
+        # Fallback: just escape and display raw
+        return f"<pre style='white-space: pre-wrap; color: #e0e0e0;'>{html.escape(prompt_text)}</pre>"
+
+    turns_html = []
+    for role, content in matches:
+        content = content.strip()
+        escaped_content = html.escape(content).replace("\n", "<br>")
+
+        # Style based on role
+        if role == "user":
+            role_color = "#60a5fa"  # Blue
+            role_label = "User"
+            bg_color = "#1e3a5f"
+        elif role == "assistant":
+            role_color = "#4ade80"  # Green
+            role_label = "Assistant"
+            bg_color = "#1a3d1a"
+        elif role == "system":
+            role_color = "#a78bfa"  # Purple
+            role_label = "System"
+            bg_color = "#2d2640"
+        else:
+            role_color = "#888"
+            role_label = role.capitalize()
+            bg_color = "#2a2a2a"
+
+        turn_html = f"""
+        <div style="
+            margin: 8px 0;
+            padding: 10px 12px;
+            border-radius: 6px;
+            background: {bg_color};
+            border-left: 3px solid {role_color};
+        ">
+            <div style="
+                font-weight: bold;
+                color: {role_color};
+                margin-bottom: 6px;
+                font-size: 12px;
+                text-transform: uppercase;
+            ">{role_label}</div>
+            <div style="
+                color: #e0e0e0;
+                font-size: 14px;
+                line-height: 1.5;
+            ">{escaped_content}</div>
+        </div>
+        """
+        turns_html.append(turn_html)
+
+    return f"<div>{''.join(turns_html)}</div>"
+
+
 def render_comparison_cards(df: pd.DataFrame, selected_indices: list[int]) -> str:
     """Render HTML cards for selected completions."""
     import html
@@ -336,9 +402,9 @@ def create_app(initial_db_path: Optional[str] = None):
 
                     # Main area
                     with gr.Column(scale=4):
-                        compare_prompt_display = gr.Markdown(
-                            "### Prompt\n\nSelect a step to begin.",
-                            elem_id="compare-prompt",
+                        gr.Markdown("### Prompt")
+                        compare_prompt_display = gr.HTML(
+                            "<p style='color: #888;'>Select a step to begin.</p>",
                         )
                         gr.Markdown("### Completions")
                         compare_cards = gr.HTML(
@@ -492,7 +558,7 @@ def create_app(initial_db_path: Optional[str] = None):
                     "Prompt 0 of 0",
                     0,
                     gr.update(choices=[], value=[]),
-                    "### Prompt\n\nSelect a step to begin.",
+                    "<p style='color: #888;'>Select a step to begin.</p>",
                     "<p style='color: #888;'>Select completions from the sidebar to compare.</p>",
                 )
 
@@ -504,7 +570,7 @@ def create_app(initial_db_path: Optional[str] = None):
                         "Prompt 0 of 0",
                         0,
                         gr.update(choices=[], value=[]),
-                        "### Prompt\n\nNo prompts found for this step.",
+                        "<p style='color: #888;'>No prompts found for this step.</p>",
                         "<p style='color: #888;'>No prompts found.</p>",
                     )
 
@@ -519,7 +585,7 @@ def create_app(initial_db_path: Optional[str] = None):
                     f"Prompt 1 of {count}",
                     0,
                     gr.update(choices=choices, value=choices[:2] if len(choices) >= 2 else choices),
-                    f"### Prompt\n\n{prompt_text}",
+                    render_prompt_html(prompt_text),
                     render_comparison_cards(df, list(df["rollout_index"][:2])),
                 )
             except Exception as e:
@@ -527,7 +593,7 @@ def create_app(initial_db_path: Optional[str] = None):
                     "Prompt 0 of 0",
                     0,
                     gr.update(choices=[], value=[]),
-                    f"### Error\n\n{e}",
+                    f"<p style='color: #f87171;'>Error: {e}</p>",
                     "<p style='color: #888;'>Error loading data.</p>",
                 )
 
@@ -537,7 +603,7 @@ def create_app(initial_db_path: Optional[str] = None):
                 return (
                     "Prompt 0 of 0",
                     gr.update(choices=[], value=[]),
-                    "### Prompt\n\nSelect a step to begin.",
+                    "<p style='color: #888;'>Select a step to begin.</p>",
                     "<p style='color: #888;'>Select completions from the sidebar to compare.</p>",
                 )
 
@@ -558,14 +624,14 @@ def create_app(initial_db_path: Optional[str] = None):
                 return (
                     f"Prompt {prompt_idx_int + 1} of {count}",
                     gr.update(choices=choices, value=choices[:2] if len(choices) >= 2 else choices),
-                    f"### Prompt\n\n{prompt_text}",
+                    render_prompt_html(prompt_text),
                     render_comparison_cards(df, list(df["rollout_index"][:2])),
                 )
             except Exception as e:
                 return (
                     "Prompt 0 of 0",
                     gr.update(choices=[], value=[]),
-                    f"### Error\n\n{e}",
+                    f"<p style='color: #f87171;'>Error: {e}</p>",
                     "<p style='color: #888;'>Error loading data.</p>",
                 )
 
