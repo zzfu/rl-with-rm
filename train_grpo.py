@@ -539,8 +539,9 @@ def _train_loop(
             prompt_ids = batch["input_ids"].to(device)
             prompt_mask = batch["attention_mask"].to(device)
 
-            # Generate completions
+            # Generate completions (eval mode to enable KV cache with gradient checkpointing)
             accum_step = step % config.grad_accum_steps + 1
+            policy.eval()
             with torch.no_grad():
                 vlog(config.verbose, global_step, "Generating completions...", accum_step, config.grad_accum_steps)
                 full_ids, full_mask, prompt_lengths = generate_completions(
@@ -628,6 +629,9 @@ def _train_loop(
             })
             # Free GPU cache to prevent VRAM accumulation during grad accum
             torch.cuda.empty_cache()
+
+            # Back to train mode for gradient computation
+            policy.train()
 
             # When accumulation complete, run n_minibatches updates over all stored data
             if (step + 1) % config.grad_accum_steps == 0:
