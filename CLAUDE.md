@@ -21,6 +21,7 @@ train_grpo.py     # GRPO policy training script
 quantize_rm.py    # RM quantization (INT8/INT4) and evaluation script
 quantize_policy.py # Policy quantization with KL divergence evaluation
 chat.py           # Gradio chatbot UI for testing models
+view_rollouts.py  # Gradio UI for browsing GRPO rollouts
 utils.py          # CLI utilities (auto argparse from dataclass)
 manage_runs.py    # Interactive tool to manage RM+GRPO runs and snapshots
 requirements.txt  # Python dependencies
@@ -71,6 +72,9 @@ requirements.txt  # Python dependencies
   - Training rollouts: step, epoch, prompt_index, rollout_index, prompt, completion, reward, advantage
   - Eval rollouts: separate `eval_rollouts` table (no advantage column)
   - Async writes via ThreadPoolExecutor (non-blocking)
+  - **Viewer**: `python view_rollouts.py path/to/rollouts.db` opens Gradio UI to browse rollouts
+    - Compare tab: side panel for step selection, prompt navigation (◀/▶), checkbox-based completion selection
+    - HTML cards for side-by-side comparison with reward-based color coding
 - **eval_steps=-1** disables evaluation entirely (useful for quick testing)
 
 ### Quantization

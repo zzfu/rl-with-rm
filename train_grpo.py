@@ -639,6 +639,9 @@ def _train_loop(
         # Storage for batch data during gradient accumulation
         stored_batches = []
 
+        # Track prompt offset across accumulation steps for rollout logging
+        accum_prompt_offset = 0
+
         pbar = tqdm(range(steps_per_epoch * config.grad_accum_steps), desc="Training", disable=config.verbose)
         for step in pbar:
             # Sample prompts
@@ -706,19 +709,20 @@ def _train_loop(
                 for i, (comp_text, reward, advantage) in enumerate(
                     zip(completion_texts, rewards_list, advantages_list)
                 ):
-                    prompt_idx = i // config.group_size
+                    batch_prompt_idx = i // config.group_size
                     rollout_idx = i % config.group_size
                     rows.append((
                         global_step,
                         epoch,
-                        prompt_idx,
+                        accum_prompt_offset + batch_prompt_idx,
                         rollout_idx,
-                        prompt_texts[prompt_idx],
+                        prompt_texts[batch_prompt_idx],
                         comp_text,
                         reward,
                         advantage,
                     ))
                 rollout_executor.submit(save_rollouts_batch, rollout_db_path, rows)
+                accum_prompt_offset += config.batch_size
 
             # Store batch data on CPU for later gradient computation
             stored_batches.append({
@@ -789,8 +793,9 @@ def _train_loop(
                     optimizer.step()
                     optimizer.zero_grad()
 
-                # Clear stored batches
+                # Clear stored batches and reset prompt offset for next step
                 stored_batches = []
+                accum_prompt_offset = 0
 
                 # Update step counter and log
                 global_step += 1
